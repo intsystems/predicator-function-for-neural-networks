@@ -7,10 +7,16 @@
 
 
 # For Introduction
-| Title                                                                  | Year | Source                                                                                                           | Description |
-| :--------------------------------------------------------------------- | ---: | :--------------------------------------------------------------------------------------------------------------- | :---------- |
-| Brain tumor detection using CNN, AlexNet & GoogLeNet ensembling learning approaches                                   | 2023 | [paper](https://www.researchgate.net/publication/369308467_Brain_tumor_detection_using_CNN_AlexNet_GoogLeNet_ensembling_learning_approaches)| -           |
-| A Comprehensive Survey of Neural Architecture Search: Challenges and Solutions                                        | 2021 | [paper](https://arxiv.org/pdf/2006.02903) | - |
+| Title                                                                               | Year | Source                                                                                                                                       | Description |
+| :---------------------------------------------------------------------------------- | ---: | :------------------------------------------------------------------------------------------------------------------------------------------- | :---------- |
+| Brain tumor detection using CNN, AlexNet & GoogLeNet ensembling learning approaches | 2023 | [paper](https://www.researchgate.net/publication/369308467_Brain_tumor_detection_using_CNN_AlexNet_GoogLeNet_ensembling_learning_approaches) | -           |
+| A Comprehensive Survey of Neural Architecture Search: Challenges and Solutions      | 2021 | [paper](https://arxiv.org/pdf/2006.02903)                                                                                                    | -           |
+| NSgGANetV2: Evolutionary Multi-Objective Surrogate-Assisted Neural Architecture Search      | 2020 | [paper](https://arxiv.org/pdf/2007.10396)                                                                                                    | -           |
+| Evolutionary Architecture Search for Graph Neural Networks     | 2020 | [paper](https://arxiv.org/pdf/2009.10199)                                                                                                    | -           |
+| MoSegNAS: Surrogate-assisted Multi-objective Neural Architecture Search for Real-time Semantic Segmentation    | 2022 | [paper](https://arxiv.org/pdf/2208.06820)                                                                                                    | -           |
+| Convolutional Neural Networks based Lung Nodule Classification: A Surrogate-Assisted Evolutionary Algorithm for Hyperparameter Optimization    | 2015 | [paper](https://shiruipan.github.io/publication/tevc-21-zhang/tevc-21-zhang.pdf)                                                                                                    | -           |
+| Combining global and local surrogate models to accelerate evolutionary optimization    | 2006 | [paper](https://www.researchgate.net/publication/3421747_Combining_global_and_local_surrogate_models_to_accelerate_evolutionary_optimization_IEEE_Trans_Syst_Man_Cybern_Part_C_Appl_Rev)                                                                                                    | -           |
+| A Survey on Evolutionary Neural Architecture Search     | 2022 | [paper](https://arxiv.org/pdf/2008.10937)                                                                                                    | -           |
 
 
 # Others
