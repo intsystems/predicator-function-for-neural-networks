@@ -9,7 +9,7 @@
 \usepackage[numbers,square,sort&compress]{natbib}
 \usepackage{algorithm}
 \usepackage[utf8]{inputenc} % allow utf-8 input
-% \usepackage[english]{babel}	% локализация и переносы
+% \usepackage[english, russian]{babel}	% локализация и переносы
 % \usepackage[russian]{babel}	% локализация и переносы
 %\usepackage[T1]{fontenc}    % use 8-bit T1 fonts
 \usepackage{booktabs}       % professional-quality tables
@@ -104,7 +104,19 @@ The automated search for optimal neural network architectures is a challenging c
 
 \section{Introduction}
 
+Neural network ensembles often demonstrate better generalization ability compared to single models, especially in classification and regression tasks \cite{E_Ren_2016, Hansen1990}. However, the key factor for a successful ensemble is not only the number of models but also their architectural diversity and ability to complement each other. Selecting an optimal architecture for even a single model is a challenging task, particularly when considering data-specific constraints and computational limitations \cite{B_Swarup_2023}.
 
+One approach to automating ensemble construction is Neural Ensemble Search (NES) \cite{Zaidi2021}, which aims to find the optimal combination of neural networks. NES, in turn, relies on Neural Architecture Search (NAS) methods, which are extensively studied and applied to search for individual neural network architectures \cite{Zoph2017, Baeck2018, Liu2023}. Unlike traditional NAS, which focuses on finding a single model, NES is designed to efficiently combine multiple networks into an ensemble.
+
+Modern NAS methods widely use surrogate functions to estimate architecture quality without requiring full model training \cite{Lu2022, Lu2020}. These functions significantly reduce computational costs, which is particularly important when searching for an optimal ensemble. For example, in \cite{Lu2022}, evolutionary algorithms were proposed in combination with surrogate models.
+
+In this work, we propose a method for constructing neural network ensembles using a surrogate function that accounts for both model classification accuracy and architectural diversity. Diversity is crucial because ensembles consisting of similar models often fail to provide a significant performance gain. To achieve this, we encode architectures and their predictions on the CIFAR-10 dataset into a latent space \cite{S_Xue_2024}. Based on the encoded dataset, we train a Graph Convolutional Network (GCN) \cite{Kipf2017}. We claim that ensembles constructed in this manner achieve higher accuracy compared to one-shot models, such as DARTS \cite{Liu2018}, or single models.
+
+Main Contributions:
+
+1) We adapt surrogate functions for ensemble construction, taking into account both predictive performance and architectural diversity.
+
+2) We propose a method for encoding the DARTS search space into a representation suitable for training a Graph Convolutional Network (GCN), where graph nodes correspond to operations within the network.
 
 \bibliographystyle{unsrtnat}
 
