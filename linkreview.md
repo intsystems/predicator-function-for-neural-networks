@@ -8,7 +8,7 @@
 # NES
 | Title                                                               | Year | Source                                                                                                         | Description                                                                                                                                       |
 | :------------------------------------------------------------------ | ---: | :------------------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------- |
-| Neural Ensemble Search for Uncertainty Estimation and Dataset Shift | 2021 | [paper](https://proceedings.neurips.cc/paper_files/paper/2021/file/41a6fd31aa2e75c3c6d427db3d17e Представлены два метода построения ансамбля нейронных моделей в случае сдвига в данных, также есть подробный обзор статей посвященных NES ы  ы  ы  ы  ы  ы  ы  ы  |
+| Neural Ensemble Search for Uncertainty Estimation and Dataset Shift | 2021 | [paper](https://proceedings.neurips.cc/paper_files/paper/2021/file/41a6fd31aa2e75c3c6d427db3d17e | Представлены два метода построения ансамбля нейронных моделей в случае сдвига в данных, также есть подробный обзор статей посвященных NES|
 
 # ENAS
 | Title                                                                                            | Year | Source                                                                         | Description |
