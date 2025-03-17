@@ -26,6 +26,12 @@ wheels/
 *.egg
 MANIFEST
 *.bin
+data/
+*.json
+*.csv
+code/dataset/
+code/results/
+
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
