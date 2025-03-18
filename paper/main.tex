@@ -126,16 +126,40 @@ Main Contributions:
 
 \subsection{Neural Architecture Search}
 
-Let $\mathcal{V} = {1, \dots, N}$ be the set of vertices, where $N$ is the number of vertices, and let $\mathcal{E} = \{(i, j) \in \mathcal{V} \times \mathcal{V} \mid i < j \}$ be the set of edges connecting them. Furthermore, let $\mathcal{O}$ denote the set of possible operations between vertices (e.g., pooling, convolutions, etc.).For
-each edge there is an operation $o \in \mathcal{O}$  that transits information from one node
-to another. The neural architecture search (NAS) problem can be formulated as finding an operation $o^{(i, j)} \in \mathcal{O}$ for each edge $(i, j)$.
+Let us consider a set of nodes \(\mathcal{V} = \{x_1, \dots, x_N\}\), representing the layers of a neural network. Additionally, let \(\mathcal{O}\) denote the set of possible operations that can be applied to these nodes (e.g., convolutions or poolings). Furthermore, let \(\mathcal{A}\) be the set of feasible architectures, represented as vectors.  
 
-Consider $\alpha \in \mathcal{A}$ as a parameter vector representing the operations assigned to edges. Then, the NAS problem can be formulated as:
+Denote \(\mathcal{L}_{train}\) and \(\mathcal{L}_{val}\) as the training and validation losses, respectively. The NAS problem can then be formulated as the search for an optimal architecture \(\alpha^*\) that minimizes \(\mathcal{L}_{val} (\alpha^*, \omega^*)\), under the constraint that the weights are obtained by minimizing the training loss:  
 
-\begin{equation} \begin{aligned} & \min_{\alpha \in \mathcal{A}} \mathcal{L}_{val}(\omega^*{\alpha}, \alpha) \\ & \text{s.t.} \quad \omega^*_{\alpha} = \arg \min_{\omega \in \mathcal{W}} \mathcal{L}_{train}(\omega, \alpha) \end{aligned} \label{eq:nas_problem} \end{equation}
+\[
+\omega^* = \arg \min_{\omega \in \mathcal{W}} \mathcal{L}_{train} (\alpha^*, \omega)
+\]
 
-where $\mathcal{W}$ is the set of all possible weights associated with operations for all potential edges in the architecture. The main challenge is the vast architecture search space (e.g., in DARTS \cite{Liu2018}, it is approximately $10^{25}$).
+This can be expressed as the following optimization problem:  
 
+\begin{equation} 
+    \begin{aligned} 
+        & \min_{\alpha \in \mathcal{A}} \mathcal{L}_{val} (\omega^*(\alpha), \alpha) \\ 
+        & \text{s.t.} \quad \omega^*(\alpha) = \arg \min_{\omega \in \mathcal{W}} \mathcal{L}_{train} (\omega, \alpha) 
+    \end{aligned}
+\label{eq:nas_problem} 
+\end{equation}  
+
+The primary challenge in this optimization lies in the immense search space of possible architectures (e.g., in DARTS \cite{Liu2018}, it is approximately \(10^{25}\)).
+
+\subsection{Neural Ensemble Search}
+
+The primary objective of NES is to find an optimal ensemble of neural networks whose architectures lie within the NAS search space.
+
+As before, we denote $\alpha \in \mathcal{A}$ as a network architecture and $\omega(\alpha)$ as its corresponding weights. The action of this network on an input $x$ is denoted by $f_{\alpha}(x, \omega(\alpha))$. Let $S \subset \mathcal{A}$ be a subset of architectures. Then, the NES problem can be formally described as follows:
+
+\begin{equation}
+    \begin{aligned}
+        &\min_{\mathcal{S}} \mathcal{L}_{val} \left( \frac{1}{|S|} \sum\limits_{\alpha \in S} f_\alpha(x, \omega^*(\alpha))\right) \\
+        & \text{s.t.} \quad \forall \alpha \in \mathcal{S}: \  \omega^*(\alpha) = \arg \min_{\omega(\alpha)} \mathcal{L}_{train}(f_\alpha(x, \omega(\alpha)))
+    \end{aligned}
+\end{equation}
+
+Thus, in addition to searching over a vast number of architectures, we now also need to find the optimal ensemble composition.
 
 \bibliographystyle{unsrtnat}
 

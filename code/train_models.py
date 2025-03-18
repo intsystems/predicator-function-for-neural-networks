@@ -118,23 +118,22 @@ def train_model(
     return model
 
 def evaluate_and_save_results(
-    models, architectures, batch_size=512, num_workers=6, folder_name="results"
+    models, architectures, valid_loader, folder_name="results"
 ):
     """
-    Оценивает модели на тестовом наборе данных CIFAR-10 и сохраняет результаты в файлы JSON.
+    Оценивает модели на валидационном наборе данных и сохраняет результаты в файлы JSON.
     Аргументы:
     models (list): Список обученных моделей.
     architectures (list): Список архитектур моделей.
-    batch_size (int, необязательно): Размер батча для загрузчика данных. По умолчанию 1024.
-    num_workers (int, необязательно): Количество потоков для загрузчика данных. По умолчанию 6.
+    valid_loader (DataLoader): DataLoader для валидационных данных.
     folder_name (str, необязательно): Имя папки для сохранения результатов. По умолчанию "results".
     Исключения:
     ValueError: Если количество моделей и архитектур не совпадает.
     Результаты:
     Для каждой модели создается файл JSON с результатами, содержащий:
     - architecture: Архитектура модели.
-    - test_predictions: Предсказания модели на тестовом наборе данных.
-    - test_accuracy: Точность модели на тестовом наборе данных.
+    - valid_predictions: Предсказания модели на валидационном наборе данных.
+    - valid_accuracy: Точность модели на валидационном наборе данных.
     """
     if len(models) != len(architectures):
         raise ValueError("Количество моделей и архитектур должно совпадать")
@@ -142,42 +141,29 @@ def evaluate_and_save_results(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     os.makedirs(folder_name, exist_ok=True)
 
-    transform = transforms.Compose(
-        [
-            transforms.ToTensor(),
-            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261)),
-        ]
-    )
-    test_dataset = CIFAR10(
-        root="./data", train=False, download=True, transform=transform
-    )
-    test_loader = DataLoader(
-        test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers
-    )
-
     for i, (model, architecture) in enumerate(zip(models, architectures)):
         model.to(device)
         model.eval()
 
-        test_correct = 0
-        test_total = 0
-        test_preds = []
+        valid_correct = 0
+        valid_total = 0
+        valid_preds = []
 
         with torch.no_grad():
-            for images, labels in test_loader:
+            for images, labels in valid_loader:
                 images, labels = images.to(device), labels.to(device)
                 outputs = model(images)
                 _, predicted = torch.max(outputs, 1)
-                test_preds.extend(predicted.cpu().tolist())
-                test_correct += (predicted == labels).sum().item()
-                test_total += labels.size(0)
+                valid_preds.extend(predicted.cpu().tolist())
+                valid_correct += (predicted == labels).sum().item()
+                valid_total += labels.size(0)
 
-        test_accuracy = test_correct / test_total
+        valid_accuracy = valid_correct / valid_total
 
         result = {
             "architecture": architecture,
-            "test_predictions": test_preds,
-            "test_accuracy": test_accuracy,
+            "valid_predictions": valid_preds,
+            "valid_accuracy": valid_accuracy,
         }
 
         file_name = f"model_{i+1}_results.json"
@@ -195,8 +181,6 @@ if __name__ == "__main__":
         batch_size=BATCH_SIZE
     )  # Получаем загрузчики CIFAR10
 
-    models = []
-    architectures = []
     for architecture in tqdm(arch_dicts):
         model = train_model(  # Обучаем модель
             architecture,
@@ -205,10 +189,8 @@ if __name__ == "__main__":
             max_epochs=MAX_EPOCHS,
             learning_rate=LEARNING_RATE,
         )
-        models.append(model)
-        architectures.append(architecture)
         clear_output(wait=True)
-
-    evaluate_and_save_results(
-        models, architectures, batch_size=BATCH_SIZE
-    )  # Оцениваем и сохраняем архитектуры, предсказания на тестовом наборе CIFAR10 и accuracy
+        
+        evaluate_and_save_results(
+            [model], [architecture], valid_loader=search_valid_loader, folder_name="results"
+        )  # Оцениваем и сохраняем архитектуры, предсказания на тестовом наборе CIFAR10 и accuracy
