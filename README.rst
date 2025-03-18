@@ -21,8 +21,9 @@
     :Научный руководитель: Бахтеев Олег
     :Научный консультант(при наличии): Бабкин Петр
 
+**Abstract**
 ========
-**Abstract**: The automated search for optimal neural network architectures (NAS) is a challenging compu-
+The automated search for optimal neural network architectures (NAS) is a challenging compu-
 tational problem, and Neural Ensemble Search (NES) is even more complex. In this work, we propose a
 surrogate-based approach for ensebmle creation. Neural architectures are represented as graphs, and their
 predictions on a dataset serve as training data for the surrogate function. Using this function, we develop
