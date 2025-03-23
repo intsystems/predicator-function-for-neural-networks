@@ -153,8 +153,9 @@ def evaluate_and_save_results(
             for images, labels in valid_loader:
                 images, labels = images.to(device), labels.to(device)
                 outputs = model(images)
+                outputs = torch.softmax(outputs, dim = 1)
+                valid_preds.extend(outputs.cpu().tolist())  
                 _, predicted = torch.max(outputs, 1)
-                valid_preds.extend(predicted.cpu().tolist())
                 valid_correct += (predicted == labels).sum().item()
                 valid_total += labels.size(0)
 
@@ -173,6 +174,7 @@ def evaluate_and_save_results(
             json.dump(result, f, indent=4)
 
         print(f"Results for model_{i + 1} saved to {file_path}")
+
 
 
 if __name__ == "__main__":
