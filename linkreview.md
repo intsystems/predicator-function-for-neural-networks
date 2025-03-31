@@ -15,7 +15,8 @@
 | Neural Ensemble Search for Uncertainty Estimation and Dataset Shift                        | 2021 | [paper](https://proceedings.neurips.cc/paper_files/paper/2021/hash/41a6fd31aa2e75c3c6d427db3d17ea80-Abstract.html)                                                              | Представлены два метода построения ансамбля нейронных моделей в случае сдвига в данных, также есть подробный обзор статей посвященных NES |
 | Neural ensemble search via Bayesian sampling                                               | 2022 | [paper](https://proceedings.mlr.press/v180/shu22a/shu22a.pdf)                                                                                                                   | Пример современного составления ансамбля                                                                                                  |
 | One-Shot Neural Ensemble Architecture Search by Diversity-Guided<br>Search Space Shrinking | 2021 | [paper](https://openaccess.thecvf.com/content/CVPR2021/papers/Chen_One-Shot_Neural_Ensemble_Architecture_Search_by_Diversity-Guided_Search_Space_Shrinking_CVPR_2021_paper.pdf) | Пример современного составления ансамбля                                                                                                  |
-| Multi-headed neural ensemble search | 2021 | [paper](https://arxiv.org/abs/2107.04369) | ансамбли лучше                                                                                                  |
+| Multi-headed neural ensemble search | 2021 | [paper](https://arxiv.org/abs/2107.04369) | ансамбли лучше |
+| Ensemble Methods as a Defense to Adversarial Perturbations Against Deep Neural Networks | 2017 | [paper](https://arxiv.org/abs/1709.03423) | ансамбли лучше |
 
 
 # ENAS
@@ -53,6 +54,8 @@
 | [Simple and scalable predictive uncertainty estimation using deep ensembles](https://proceedings.neurips.cc/paper_files/paper/2017/hash/9ef2ed4b7fd2c810847ffa5fa85bce38-Abstract.html) | 2017 |                                                                                                                                                                                                                                                                                                                                              | Реализация DeepEns -- базового алгоритма составления ансамбля на основе баггинга              |
 | [**Facenet**: A unified embedding for face recognition and clustering](https://www.cv-foundation.org/openaccess/content_cvpr_2015/html/Schroff_FaceNet_A_Unified_2015_CVPR_paper.html)  | 2015 |                                                                                                                                                                                                                                                                                                                                              | В статье представлена реализация Triplet loss                                                 |
 | Brain tumor detection using CNN, AlexNet & GoogLeNet ensembling learning approaches. | 2023 | [paper](https://openurl.ebsco.com/EPDB%3Agcd%3A8%3A34114136/detailv2?sid=ebsco%3Aplink%3Ascholar&id=ebsco%3Agcd%3A178322108&crl=c&link_origin=scholar.google.com) | Пример того, что построние арзитектуры руками сложно |
+| Ensemble methods in machine learning. | 2000 | [paper](https://link.springer.com/chapter/10.1007/3-540-45014-9_1) | Ансамбли лучше |
+
 
 
 
