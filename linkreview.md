@@ -15,6 +15,8 @@
 | Neural Ensemble Search for Uncertainty Estimation and Dataset Shift                        | 2021 | [paper](https://proceedings.neurips.cc/paper_files/paper/2021/hash/41a6fd31aa2e75c3c6d427db3d17ea80-Abstract.html)                                                              | Представлены два метода построения ансамбля нейронных моделей в случае сдвига в данных, также есть подробный обзор статей посвященных NES |
 | Neural ensemble search via Bayesian sampling                                               | 2022 | [paper](https://proceedings.mlr.press/v180/shu22a/shu22a.pdf)                                                                                                                   | Пример современного составления ансамбля                                                                                                  |
 | One-Shot Neural Ensemble Architecture Search by Diversity-Guided<br>Search Space Shrinking | 2021 | [paper](https://openaccess.thecvf.com/content/CVPR2021/papers/Chen_One-Shot_Neural_Ensemble_Architecture_Search_by_Diversity-Guided_Search_Space_Shrinking_CVPR_2021_paper.pdf) | Пример современного составления ансамбля                                                                                                  |
+| Multi-headed neural ensemble search | 2021 | [paper](https://arxiv.org/abs/2107.04369) | ансамбли лучше                                                                                                  |
+
 
 # ENAS
 | Title                                                                                            | Year | Source                                                                         | Description |
