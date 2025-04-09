@@ -12,7 +12,7 @@ from nni.nas.space import model_context
 from tqdm import tqdm
 from IPython.display import clear_output
 
-ARCHITECTURES_PATH = "dataset/arch_dicts.json"
+ARCHITECTURES_PATH = "best_models"
 MAX_EPOCHS = 50
 LEARNING_RATE = 1e-3
 BATCH_SIZE = 256
@@ -20,19 +20,19 @@ CIFAR_MEAN = [0.49139968, 0.48215827, 0.44653124]
 CIFAR_STD = [0.24703233, 0.24348505, 0.26158768]
 
 
-def load_arch_dicts(json_path):
-    """
-    Загружает словари архитектур из JSON файла.
-
-    Аргументы:
-        json_path (str): Путь к JSON файлу, содержащему словари архитектур.
-
-    Возвращает:
-        dict: Словарь, содержащий конфигурации архитектур.
-    """
-    with open(json_path, "r") as f:
-        arch_dicts = json.load(f)
-    return arch_dicts
+def load_json_from_directory(directory_path):
+    json_data = []
+    for root, _, files in os.walk(directory_path):
+        for file in files:
+            if file.endswith('.json'):
+                file_path = os.path.join(root, file)
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    try:
+                        data = json.load(f)
+                        json_data.append(data)
+                    except json.JSONDecodeError as e:
+                        print(f"Error decoding JSON from file {file_path}: {e}")
+    return json_data
 
 
 def get_data_loaders(batch_size=512):
@@ -178,21 +178,22 @@ def evaluate_and_save_results(
 
 
 if __name__ == "__main__":
-    arch_dicts = load_arch_dicts(ARCHITECTURES_PATH)  # Загружаем словари архитектур
-    search_train_loader, search_valid_loader = get_data_loaders(
-        batch_size=BATCH_SIZE
-    )  # Получаем загрузчики CIFAR10
+    arch_dicts = load_json_from_directory(ARCHITECTURES_PATH)  # Загружаем словари архитектур
+    print(arch_dicts)
+    # search_train_loader, search_valid_loader = get_data_loaders(
+    #     batch_size=BATCH_SIZE
+    # )  # Получаем загрузчики CIFAR10
 
-    for architecture in tqdm(arch_dicts):
-        model = train_model(  # Обучаем модель
-            architecture,
-            search_train_loader,
-            search_valid_loader,
-            max_epochs=MAX_EPOCHS,
-            learning_rate=LEARNING_RATE,
-        )
-        clear_output(wait=True)
+    # for architecture in tqdm(arch_dicts):
+    #     model = train_model(  # Обучаем модель
+    #         architecture,
+    #         search_train_loader,
+    #         search_valid_loader,
+    #         max_epochs=MAX_EPOCHS,
+    #         learning_rate=LEARNING_RATE,
+    #     )
+    #     clear_output(wait=True)
         
-        evaluate_and_save_results(
-            [model], [architecture], valid_loader=search_valid_loader, folder_name="results"
-        )  # Оцениваем и сохраняем архитектуры, предсказания на тестовом наборе CIFAR10 и accuracy
+    #     evaluate_and_save_results(
+    #         [model], [architecture], valid_loader=search_valid_loader, folder_name="results"
+    #     )  # Оцениваем и сохраняем архитектуры, предсказания на тестовом наборе CIFAR10 и accuracy
