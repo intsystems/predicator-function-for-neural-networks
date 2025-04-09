@@ -241,7 +241,8 @@ def train_model_diversity(
     model,
     train_loader,
     valid_loader,
-    discrete_diversity_matrix,
+    discrete_diversity_matrix_train,
+    discrete_diversity_matrix_valid,
     optimizer,
     criterion,
     num_epochs,
@@ -270,7 +271,7 @@ def train_model_diversity(
             anchor = model(features, edge_index)
 
             positive_index, negative_index = get_positive_and_negative(
-                discrete_diversity_matrix, index, train_loader.dataset
+                discrete_diversity_matrix_train, i
             )
             if positive_index is None or negative_index is None:
                 continue
@@ -317,7 +318,7 @@ def train_model_diversity(
                 anchor = model(features, edge_index)
 
                 positive_index, negative_index = get_positive_and_negative(
-                    discrete_diversity_matrix, index, valid_loader.dataset
+                    discrete_diversity_matrix_valid, i
                 )
                 if positive_index is None or negative_index is None:
                     continue
@@ -477,28 +478,8 @@ def train_model_accuracy(
     return train_losses, valid_losses
 
 
-def get_positive_and_negative(diversity_matrix, index, dataset=None):
-    positive = np.where(
-        (diversity_matrix[index, :] == 1) & (np.arange(len(diversity_matrix)) != index)
-    )[0].tolist()
-    negative = np.where(diversity_matrix[index, :] == -1)[0].tolist()
-
-    if dataset is not None:
-        appropriate_indexes = [dataset[i][2] for i in range(len(dataset))]
-
-        positive = [
-            appropriate_indexes.index(idx)
-            for idx in positive
-            if idx in appropriate_indexes
-        ]
-        negative = [
-            appropriate_indexes.index(idx)
-            for idx in negative
-            if idx in appropriate_indexes
-        ]
-
-    if not positive or not negative:
-        print("Both positive and negative samples are empty!")
-        return None, None
+def get_positive_and_negative(diversity_matrix, index):
+    positive = np.where(diversity_matrix[index] == 1)[0]
+    negative = np.where(diversity_matrix[index] == 0)[0]
 
     return np.random.choice(positive), np.random.choice(negative)
