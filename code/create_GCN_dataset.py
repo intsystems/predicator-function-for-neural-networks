@@ -53,11 +53,9 @@ apply_softmax_to_predictions(first_arch_dicts)
 save_dicts_as_json(first_arch_dicts, output_dir)
 
 apply_argmax_to_predictions(first_arch_dicts)
-output_dir = "tmp_dataset"
-save_dicts_as_json(first_arch_dicts, output_dir)
 
 second_arch_dicts = load_json_from_directory("second_dataset")
+second_arch_dicts.extend(first_arch_dicts)
 
-first_arch_dicts.extend(second_arch_dicts)
 output_dir = "third_dataset"
-save_dicts_as_json(first_arch_dicts, output_dir)
+save_dicts_as_json(second_arch_dicts, output_dir)
