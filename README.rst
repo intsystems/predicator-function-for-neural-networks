@@ -15,16 +15,23 @@
 
 .. class:: center
 
-    :Название исследуемой задачи: Использование придакторной функции для построения ансамбля нейросетей
+    :Название исследуемой задачи: Использование предикаторной функции для построения ансамбля нейросетей
     :Тип научной работы: M1P
     :Автор: Уденеев Александр Владимирович
     :Научный руководитель: Бахтеев Олег
     :Научный консультант(при наличии): Бабкин Петр
 
-Abstract
+**Abstract**
 ========
+The automated search for optimal neural network architectures (NAS) is a challenging compu-
+tational problem, and Neural Ensemble Search (NES) is even more complex. In this work, we propose a
+surrogate-based approach for ensebmle creation. Neural architectures are represented as graphs, and their
+predictions on a dataset serve as training data for the surrogate function. Using this function, we develop
+an efficient NES framework that enables the selection of diverse and high-performing architectures. The
+resulting ensemble achieves superior predictive accuracy on CIFAR-10 compared to other one-shot NES
+methods, demonstrating the effectiveness of our approach.
 
-Purus sit amet luctus venenatis lectus magna fringilla. Condimentum id venenatis a condimentum vitae sapien. Auctor neque vitae tempus quam pellentesque nec nam aliquam. Eget egestas purus viverra accumsan in. Nam aliquam sem et tortor. Donec et odio pellentesque diam volutpat commodo. Odio pellentesque diam volutpat commodo sed egestas. Sit amet dictum sit amet justo. Pellentesque sit amet porttitor eget. Imperdiet sed euismod nisi porta lorem mollis aliquam ut. Quis varius quam quisque id diam vel quam elementum. Ornare lectus sit amet est placerat in. Vulputate dignissim suspendisse in est ante. Elit sed vulputate mi sit amet mauris. Egestas sed tempus urna et pharetra pharetra. Viverra tellus in hac habitasse platea dictumst vestibulum rhoncus.
+**Keywords**: NES, GCN, triplet loss, surrogate function
 
 Research publications
 ===============================

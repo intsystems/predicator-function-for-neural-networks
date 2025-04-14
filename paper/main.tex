@@ -94,8 +94,9 @@
 %\dedication{...}
 	
 \abstract{
-The automated search for optimal neural network architectures is a challenging computational problem, and Neural Ensemble Search (NES) is even more complex. In this work, we propose a surrogate-based approach to estimate ensemble diversity. Neural architectures are represented as graphs, and their predictions on a dataset serve as training data for the surrogate function. Using this method, we develop an efficient NES framework that enables the selection of diverse and high-performing architectures. The resulting ensemble achieves superior predictive accuracy on CIFAR-10 compared to other one-shot NES methods, demonstrating the effectiveness of our approach.
+The automated search for optimal neural network architectures (NAS) is a challenging computational problem, and Neural Ensemble Search (NES) is even more complex. In this work, we propose a surrogate-based approach for ensebmle creation. Neural architectures are represented as graphs, and their predictions on a dataset serve as training data for the surrogate function. Using this function, we develop an efficient NES framework that enables the selection of diverse and high-performing architectures. The resulting ensemble achieves superior predictive accuracy on CIFAR-10 compared to other one-shot NES methods, demonstrating the effectiveness of our approach.
 }
+
 \keywords{NES, GCN, triplet loss, surrogate function.}
 
 
@@ -104,19 +105,61 @@ The automated search for optimal neural network architectures is a challenging c
 
 \section{Introduction}
 
-Neural network ensembles often demonstrate better generalization ability compared to single models, especially in classification and regression tasks \cite{E_Ren_2016, Hansen1990}. However, the key factor for a successful ensemble is not only the number of models but also their architectural diversity and ability to complement each other. Selecting an optimal architecture for even a single model is a challenging task, particularly when considering data-specific constraints and computational limitations \cite{B_Swarup_2023}.
+Neural network ensembles often demonstrate better accuracy compared to single models, especially in classification and regression tasks \cite{E_Ren_2016, Hansen1990}. This fact gives rise to the problem of constructing an efficient ensemble of models (NES) \cite{Zaidi2021}. NES, in turn, relies on Neural Architecture Search (NAS) methods, which are extensively studied and applied to search for individual neural network architectures, such as evolutionary algorithms \cite{real2017large, real2019regularized}, reinforcement learning \cite{Zoph2017, xie2018snas, Liu2023}, and Bayesian optimization \cite{jin2019auto, kandasamy2018neural}. Selecting an optimal architecture for even a single model is a challenging task, particularly when considering data-specific constraints and computational limitations \cite{B_Swarup_2023}.
 
-One approach to automating ensemble construction is Neural Ensemble Search (NES) \cite{Zaidi2021}, which aims to find the optimal combination of neural networks. NES, in turn, relies on Neural Architecture Search (NAS) methods, which are extensively studied and applied to search for individual neural network architectures \cite{Zoph2017, Baeck2018, Liu2023}. Unlike traditional NAS, which focuses on finding a single model, NES is designed to efficiently combine multiple networks into an ensemble.
+The simplest approach for ensemble construction is the use of DeepEns \cite{lakshminarayanan2017simple}, implemented through DARTS \cite{Liu2018}. It involves a random search for several architectures, which are then combined into an ensemble. Despite its simplicity in implementation and hyperparameter tuning, this method is computationally expensive. More sophisticated adaptation techniques are presented in some recent works \cite{pmlr-v180-shu22a, Zaidi2021, O_Chen_2021}, which are designed to efficiently combine multiple networks into an ensemble.
 
-Modern NAS methods widely use surrogate functions to estimate architecture quality without requiring full model training \cite{Lu2022, Lu2020}. These functions significantly reduce computational costs, which is particularly important when searching for an optimal ensemble. For example, in \cite{Lu2022}, evolutionary algorithms were proposed in combination with surrogate models.
+Our research also adapts ideas from NAS for NES, specifically using a surrogate function. Some modern NAS methods widely use surrogate functions to estimate architecture quality without requiring full model training \cite{Lu2022, Lu2020, Calisto2021}. These functions significantly reduce computational costs, expanding the applicability of such methods. For example, in \cite{Lu2022}, evolutionary algorithms were proposed in combination with surrogate models for real-time semantic segmentation. In \cite{Calisto2021}, a Surrogate-assisted Multiobjective Evolutionary-based Algorithm (SaMEA) is used for 3D medical image segmentation.
 
-In this work, we propose a method for constructing neural network ensembles using a surrogate function that accounts for both model classification accuracy and architectural diversity. Diversity is crucial because ensembles consisting of similar models often fail to provide a significant performance gain. To achieve this, we encode architectures and their predictions on the CIFAR-10 dataset into a latent space \cite{S_Xue_2024}. Based on the encoded dataset, we train a Graph Convolutional Network (GCN) \cite{Kipf2017}. We claim that ensembles constructed in this manner achieve higher accuracy compared to one-shot models, such as DARTS \cite{Liu2018}, or single models.
+In this work, we propose a method for constructing neural network ensembles using a surrogate function that accounts for both model classification accuracy and architectural diversity. Diversity is crucial because ensembles consisting of similar models often fail to provide a significant performance gain. The surrogate function is used to encode the architecture into a latent space \cite{S_Xue_2024}, which reflects both the diversity and predictive ability of the architectures. Since a neural network architecture is represented as a graph, using a Graph Neural Network (GNN) \cite{Kipf2017} as a surrogate function \cite{wen2020neural} seems natural. To train it to predict model diversity, we use Triplet Loss \cite{schroff2015facenet}, similar to \cite{S_Xue_2024}. We validate this approach on CIFAR-10, demonstrating the effectiveness of the surrogate function for predicting diversity and constructing ensembles. We claim that ensembles constructed in this manner achieve state-of-the-art accuracy compared to one-shot NES algorithms, such as DeepEns \cite{lakshminarayanan2017simple}.
 
 Main Contributions:
 
-1) We adapt surrogate functions for ensemble construction, taking into account both predictive performance and architectural diversity.
+1) We propose a method for encoding the DARTS \cite{Liu2018} search space into a representation suitable for training a Graph Neural Network (GNN), where graph nodes correspond to operations within the network.
 
-2) We propose a method for encoding the DARTS search space into a representation suitable for training a Graph Convolutional Network (GCN), where graph nodes correspond to operations within the network.
+2) We propose a way for training the surrogate function to predict the diversity of architectures.
+
+3) We adapt surrogate functions for ensemble construction, taking into account both predictive performance and architectural diversity.
+
+
+\section{Problem statement}
+
+\subsection{Neural Architecture Search}
+
+Let us consider a set of nodes \(\mathcal{V} = \{x_1, \dots, x_N\}\), representing the layers of a neural network. Additionally, let \(\mathcal{O}\) denote the set of possible operations that can be applied to these nodes (e.g., convolutions or poolings). Furthermore, let \(\mathcal{A}\) be the set of feasible architectures, represented as vectors.  
+
+Denote \(\mathcal{L}_{train}\) and \(\mathcal{L}_{val}\) as the training and validation losses, respectively. The NAS problem can then be formulated as the search for an optimal architecture \(\alpha^*\) that minimizes \(\mathcal{L}_{val} (\alpha^*, \omega^*)\), under the constraint that the weights are obtained by minimizing the training loss:  
+
+\[
+\omega^* = \arg \min_{\omega \in \mathcal{W}} \mathcal{L}_{train} (\alpha^*, \omega)
+\]
+
+This can be expressed as the following optimization problem:  
+
+\begin{equation} 
+    \begin{aligned} 
+        & \min_{\alpha \in \mathcal{A}} \mathcal{L}_{val} (\omega^*(\alpha), \alpha) \\ 
+        & \text{s.t.} \quad \omega^*(\alpha) = \arg \min_{\omega \in \mathcal{W}} \mathcal{L}_{train} (\omega, \alpha) 
+    \end{aligned}
+\label{eq:nas_problem} 
+\end{equation}  
+
+The primary challenge in this optimization lies in the immense search space of possible architectures (e.g., in DARTS \cite{Liu2018}, it is approximately \(10^{25}\)).
+
+\subsection{Neural Ensemble Search}
+
+The primary objective of NES is to find an optimal ensemble of neural networks whose architectures lie within the NAS search space.
+
+As before, we denote $\alpha \in \mathcal{A}$ as a network architecture and $\omega(\alpha)$ as its corresponding weights. The action of this network on an input $x$ is denoted by $f_{\alpha}(x, \omega(\alpha))$. Let $S \subset \mathcal{A}$ be a subset of architectures. Then, the NES problem can be formally described as follows:
+
+\begin{equation}
+    \begin{aligned}
+        &\min_{\mathcal{S}} \mathcal{L}_{val} \left( \frac{1}{|S|} \sum\limits_{\alpha \in S} f_\alpha(x, \omega^*(\alpha))\right) \\
+        & \text{s.t.} \quad \forall \alpha \in \mathcal{S}: \  \omega^*(\alpha) = \arg \min_{\omega(\alpha)} \mathcal{L}_{train}(f_\alpha(x, \omega(\alpha)))
+    \end{aligned}
+\end{equation}
+
+Thus, in addition to searching over a vast number of architectures, we now also need to find the optimal ensemble composition.
 
 \bibliographystyle{unsrtnat}
 
