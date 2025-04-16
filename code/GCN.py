@@ -352,6 +352,15 @@ def train_model_diversity(
             pass
 
         plt.figure(figsize=(12, 6))
+
+        plt.rc('font', size=16)          # controls default text sizes
+        plt.rc('axes', titlesize=16)     # fontsize of the axes title
+        plt.rc('axes', labelsize=16)    # fontsize of the x and y labels
+        plt.rc('xtick', labelsize=16)    # fontsize of the tick labels
+        plt.rc('ytick', labelsize=16)    # fontsize of the tick labels
+        plt.rc('legend', fontsize=16)    # legend fontsize
+        plt.rc('figure', titlesize=16)   # fontsize of the figure title
+
         plt.plot(
             range(1, len(train_losses) + 1),
             train_losses,
@@ -451,6 +460,15 @@ def train_model_accuracy(
             pass
 
         plt.figure(figsize=(12, 6))
+
+        plt.rc('font', size=16)          # controls default text sizes
+        plt.rc('axes', titlesize=16)     # fontsize of the axes title
+        plt.rc('axes', labelsize=16)    # fontsize of the x and y labels
+        plt.rc('xtick', labelsize=16)    # fontsize of the tick labels
+        plt.rc('ytick', labelsize=16)    # fontsize of the tick labels
+        plt.rc('legend', fontsize=16)    # legend fontsize
+        plt.rc('figure', titlesize=16)   # fontsize of the figure title
+
         plt.plot(
             range(1, len(train_losses) + 1),
             train_losses,
@@ -466,6 +484,7 @@ def train_model_accuracy(
         plt.title("Training and Validation Loss Over Epochs")
         plt.xlabel("Epoch")
         plt.ylabel("Loss")
+        plt.ylim(0, 0.002)
         plt.grid(True)
         plt.legend()
         plt.show()
