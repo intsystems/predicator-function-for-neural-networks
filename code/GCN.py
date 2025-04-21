@@ -37,6 +37,7 @@ class SimpleGCN(nn.Module):
         self.gc1 = GCNConv(input_dim, hidden_dim)
         self.gc2 = GCNConv(hidden_dim, hidden_dim)
         self.graph_norm = GraphNorm(hidden_dim)
+        self.layer_norm = nn.LayerNorm(hidden_dim)
         self.dropout = nn.Dropout(dropout)
         self.pooling = pooling
         self.fc = nn.Linear(hidden_dim, embedding_dim)
@@ -44,10 +45,12 @@ class SimpleGCN(nn.Module):
     def forward(self, x, edge_index):
         x = F.relu(self.gc1(x, edge_index))
         x = self.graph_norm(x)
+        x = self.layer_norm(x)
         x = self.dropout(x)
 
         x = F.relu(self.gc2(x, edge_index))
         x = self.graph_norm(x)
+        x = self.layer_norm(x)
         x = self.dropout(x)
 
         # Глобальное агрегирование узловых признаков для получения представления всего графа
@@ -74,21 +77,24 @@ class GCN(nn.Module):
 
         self.input_dim = input_dim
         self.output_dim = output_dim
+        self.hidden_dim = 64  # базовая размерность скрытого слоя
 
-        self.gc1 = GCNConv(input_dim, 128)
-        self.gc2 = GCNConv(128, 256)
-        self.gc3 = GCNConv(256, 64)
-        self.layer_norm = nn.LayerNorm(64)
-        self.fc = nn.Linear(64, output_dim)
+        self.gc1 = GCNConv(input_dim, self.hidden_dim)
+        self.gc2 = GCNConv(self.hidden_dim, 256)
+        self.gc3 = GCNConv(256, 512)
+        self.gc4 = GCNConv(512, self.hidden_dim)
+
+        self.residual_proj = (
+            nn.Linear(input_dim, self.hidden_dim) if input_dim != self.hidden_dim else nn.Identity()
+        )
+
+        self.layer_norm = nn.LayerNorm(self.hidden_dim)
         self.dropout = nn.Dropout(dropout)
         self.pooling = pooling
 
-        self.key = nn.Linear(256, 256)
-        self.query = nn.Linear(256, 256)
-
-        self.residual_proj = (
-            nn.Linear(input_dim, 64) if input_dim != 64 else nn.Identity()
-        )
+        self.fc1 = nn.Linear(self.hidden_dim, self.hidden_dim)
+        self.fc_norm = nn.LayerNorm(self.hidden_dim)
+        self.fc2 = nn.Linear(self.hidden_dim, output_dim)
 
     def forward(self, x, edge_index):
         residual = self.residual_proj(x)
@@ -99,22 +105,13 @@ class GCN(nn.Module):
         x = F.leaky_relu(self.gc2(x, edge_index))
         x = self.dropout(x)
 
-        keys = self.key(x)  # [N, 128]
-        queries = self.query(x)  # [N, 128]
-        attn_scores = torch.mm(queries, keys.T)  # [N, N]
-
-        row, col = edge_index
-        mask = torch.zeros_like(attn_scores)
-        mask[row, col] = 1
-        attn_scores = attn_scores * mask
-        attn_scores = F.softmax(attn_scores, dim=-1)
-
-        x = torch.mm(attn_scores, x)  # [N, N] * [N, 128] → [N, 128]
-
         x = F.leaky_relu(self.gc3(x, edge_index))
         x = self.dropout(x)
 
-        x = self.layer_norm(x + residual)  # LayerNorm
+        x = F.leaky_relu(self.gc4(x, edge_index))
+        x = self.dropout(x)
+
+        x = self.layer_norm(x + residual)
 
         if self.pooling == "max":
             x = torch.max(x, dim=0).values
@@ -125,9 +122,13 @@ class GCN(nn.Module):
         else:
             raise ValueError("Unsupported pooling method. Use 'max', 'mean' or 'sum'.")
 
-        x = self.fc(x)
+        x = self.fc1(x)
+        x = self.fc_norm(x)
+        x = F.leaky_relu(x)
+        x = self.fc2(x)
+
         if self.output_dim == 1:
-            x = nn.Sigmoid()(x)
+            x = torch.sigmoid(x)
         return x
 
 
@@ -373,7 +374,6 @@ def train_model_diversity(
             marker="o",
             label="Valid Loss",
         )
-        plt.title("Training and Validation Loss Over Epochs")
         plt.xlabel("Epoch")
         plt.ylabel("Loss")
         plt.grid(True)
@@ -481,7 +481,6 @@ def train_model_accuracy(
             marker="o",
             label="Valid Loss",
         )
-        plt.title("Training and Validation Loss Over Epochs")
         plt.xlabel("Epoch")
         plt.ylabel("Loss")
         plt.ylim(0, 0.002)
