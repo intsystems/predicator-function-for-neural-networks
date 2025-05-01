@@ -11,6 +11,7 @@ import json
 import os
 
 from tqdm.notebook import tqdm
+from joblib import Parallel, delayed
 
 
 DARTS_OPS = [
@@ -45,16 +46,16 @@ def generate_cells(num_nodes, name='normal', operations=DARTS_OPS):
         
     return cells
 
-def generate_arch_dicts(N_MODELS):
-    arch_dicts = []
-    for _ in tqdm(range(N_MODELS)):
-        normal_cell = generate_cells(5, name='normal')
-        reduction_cell = generate_cells(5, name='reduce')
-        arch_dict = {**normal_cell, **reduction_cell}
-        arch_dicts.append(arch_dict)
-    return arch_dicts
+def generate_single_architecture():
+    normal_cell = generate_cells(5, name='normal')
+    reduction_cell = generate_cells(5, name='reduce')
+    tmp_dict = {**normal_cell, **reduction_cell}
+    return {'architecture': tmp_dict}
 
-if __name__ == "__main__":
-    N_MODELS = 3
-    arch_dicts = generate_arch_dicts(N_MODELS)
-    print(arch_dicts)
+def generate_arch_dicts(N_MODELS, use_tqdm=False):
+    iterable = range(N_MODELS)
+    if use_tqdm:
+        iterable = tqdm(iterable)
+
+    arch_dicts = Parallel(n_jobs=-1)(delayed(generate_single_architecture)() for _ in iterable)
+    return arch_dicts

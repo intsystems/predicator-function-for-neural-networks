@@ -15,7 +15,9 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 import numpy as np
 from torch.utils.data import Dataset
-
+from joblib import Parallel, delayed
+from torch_geometric.data import Data, Batch
+from torch_geometric.loader import DataLoader
 
 class SimpleGCN(nn.Module):
     def __init__(
@@ -96,7 +98,7 @@ class GCN(nn.Module):
         self.fc_norm = nn.LayerNorm(self.hidden_dim)
         self.fc2 = nn.Linear(self.hidden_dim, output_dim)
 
-    def forward(self, x, edge_index):
+    def forward(self, x, edge_index, batch=None):
         residual = self.residual_proj(x)
 
         x = F.leaky_relu(self.gc1(x, edge_index))
@@ -113,10 +115,11 @@ class GCN(nn.Module):
 
         x = self.layer_norm(x + residual)
 
+        # Используем global pooling в зависимости от выбранного метода
         if self.pooling == "max":
-            x = torch.max(x, dim=0).values
+            x = global_max_pool(x, batch)
         elif self.pooling == "mean":
-            x = torch.mean(x, dim=0)
+            x = global_mean_pool(x, batch)
         elif self.pooling == "sum":
             x = torch.sum(x, dim=0)
         else:
@@ -130,7 +133,6 @@ class GCN(nn.Module):
         if self.output_dim == 1:
             x = torch.sigmoid(x)
         return x
-
 
 class SimpleGAT(nn.Module):
     def __init__(
@@ -197,195 +199,230 @@ class SimpleGAT(nn.Module):
 
         return embedding
 
-
 class CustomDataset(Dataset):
-    def __init__(self, graphs, accuracies=None):
-        self.indexes = []
-        self.adjs, self.features = [], []
-        if accuracies is None:
-            self.accuracies = None
-        else:
-            self.accuracies = torch.tensor(accuracies, dtype=torch.float)
-
-        for graph in tqdm(graphs):
-            adj, _, features = graph.get_adjacency_matrix()
-            adj, features = self.preprocess(adj, features)
-
-            self.adjs.append(adj)
-            self.features.append(features)
-            self.indexes.append(graph.index)
-
-    def preprocess(self, adj, features):
+    @staticmethod
+    def preprocess(adj, features):
         """Преобразует матрицу смежности и признаки в тензоры."""
         adj = torch.tensor(adj, dtype=torch.float)
         features = torch.tensor(features, dtype=torch.float)
         return adj, features
 
+    @staticmethod
+    def process_graph(graph):
+        adj, _, features = graph.get_adjacency_matrix()
+        adj, features = CustomDataset.preprocess(adj, features)
+        return graph.index, adj, features
+
+    def __init__(self, graphs, accuracies=None, use_tqdm=False):
+        self.indexes = []
+        self.adjs, self.features = [], []
+        self.accuracies = torch.tensor(accuracies, dtype=torch.float) if accuracies is not None else None
+
+        iterator = tqdm(graphs) if use_tqdm else graphs
+
+        results = Parallel(n_jobs=-1)(
+            delayed(CustomDataset.process_graph)(graph) for graph in iterator
+        )
+
+        for index, adj, features in results:
+            self.indexes.append(index)
+            self.adjs.append(adj)
+            self.features.append(features)
+
     def __getitem__(self, index):
-        if isinstance(index, (list, tuple, np.ndarray)):
-            result = []
-            for i in index:
-                if self.accuracies is None:
-                    result.append([self.adjs[i], self.features[i], self.indexes[i]])
-                else:
-                    result.append([self.adjs[i], self.features[i], self.indexes[i], self.accuracies[i]])
-            return result
-        else:
-            if self.accuracies is None:
-                return self.adjs[index], self.features[index], self.indexes[index]
-            return self.adjs[index], self.features[index], self.indexes[index], self.accuracies[index]
+        adj = self.adjs[index]
+        features = self.features[index]
+        edge_index, _ = dense_to_sparse(adj)
+
+        data = Data(x=features, edge_index=edge_index)
+        data.index = self.indexes[index]
+        if self.accuracies is not None:
+            data.y = self.accuracies[index]
+        return data
 
     def __len__(self):
         return len(self.indexes)
 
+class TripletGraphDataset(Dataset):
+    def __init__(self, base_dataset, diversity_matrix):
+        """
+        base_dataset: CustomDataset, отдающий Data с .index
+        diversity_matrix: матрица [M, M], M >= N, значений {1, -1, 0}
+        """
+        self.base = base_dataset
+        self.div = diversity_matrix
+        self.N = len(self.base)
+
+        # Строим отображение оригинального индекса -> внутренний
+        # пример: если base_dataset[5].index == 42, то orig2int[42] = 5
+        self.orig2int = {
+            self.base[i].index: i
+            for i in range(self.N)
+        }
+
+    def __len__(self):
+        return self.N
+
+    def __getitem__(self, idx):
+        # 1) Получаем Data и его оригинальный индекс
+        anchor = self.base[idx]
+        anchor_orig = anchor.index  # в диапазоне [0, M-1]
+
+        # 2) Берём строку diversity_matrix по оригинальному индексу
+        row = self.div[anchor_orig]  # длина M
+
+        # 3) Находим оригинальные индексы положительных и отрицательных
+        pos_orig = np.where((row == 1) & (np.arange(len(row)) != anchor_orig))[0]
+        neg_orig = np.where(row == -1)[0]
+
+        # 4) Фильтруем по наличию в self.orig2int
+        pos_orig = [i for i in pos_orig if i in self.orig2int]
+        neg_orig = [i for i in neg_orig if i in self.orig2int]
+
+        # 5) Проверка наличия хотя бы одного положительного и отрицательного
+        if len(pos_orig) == 0 or len(neg_orig) == 0:
+            raise IndexError(f"No valid pos/neg for original index {anchor_orig}")
+
+        # 6) Случайно выбираем подходящие индексы
+        pos_o = int(np.random.choice(pos_orig))
+        neg_o = int(np.random.choice(neg_orig))
+
+        # 7) Переводим в внутренние индексы и получаем Data
+        pos_int = self.orig2int[pos_o]
+        neg_int = self.orig2int[neg_o]
+
+        positive = self.base[pos_int]
+        negative = self.base[neg_int]
+
+        # 8) Возвращаем три Data и тензор оригинальных индексов
+        idx_triplet = torch.tensor([anchor_orig, pos_o, neg_o], dtype=torch.long)
+        return anchor, positive, negative, idx_triplet
+
+def collate_triplets(batch):
+    """
+    batch: list of tuples (anchor, pos, neg, idx_triplet)
+    Возвращаем:
+      - три Batched Data
+      - один LongTensor [batch_size, 3] с исходными индексами
+    """
+    anchors, positives, negatives, idxs = zip(*batch)
+    batch_anchor = Batch.from_data_list(anchors)
+    batch_positive = Batch.from_data_list(positives)
+    batch_negative = Batch.from_data_list(negatives)
+    # соберём матрицу индексов shape=(batch_size,3)
+    idx_tensor = torch.cat(idxs, dim=0).view(-1, 3)
+    return batch_anchor, batch_positive, batch_negative, idx_tensor
+
+
+def collate_graphs(batch):
+    """
+    batch: list of torch_geometric.data.Data
+    Возвращает Batch, который можно подать в GNN.
+    """
+    return Batch.from_data_list(batch)
+
+
 def train_model_diversity(
     model,
-    train_loader,
-    valid_loader,
-    discrete_diversity_matrix,
+    train_loader,         # DataLoader выдаёт (anchor_batch, pos_batch, neg_batch)
+    valid_loader,         # То же для валидации
     optimizer,
     criterion,
     num_epochs,
     device="cpu",
     developer_mode=False,
 ):
-    model.to(device)  # Перемещение модели на GPU
-    train_losses = []
-    valid_losses = []
-
+    model.to(device)
+    train_losses, valid_losses = [], []
     scheduler = StepLR(optimizer, step_size=5, gamma=0.5)
 
     for epoch in tqdm(range(num_epochs), desc="Training Progress"):
+        # --------------------
+        # 1) Тренировочный проход
+        # --------------------
         model.train()
-        train_loss = 0
-        for i, (adj, features, index, _) in enumerate(train_loader):
+        running_loss = 0.0
+        n_batches = 0
+
+        for i, (anchor_batch, pos_batch, neg_batch, idx_triplet) in enumerate(train_loader):
             if developer_mode and i > 0:
-                break  # Only process one batch in developer mode
+                break
 
             optimizer.zero_grad()
+            # Переносим весь батч на device
+            anchor_batch = anchor_batch.to(device)
+            pos_batch    = pos_batch.to(device)
+            neg_batch    = neg_batch.to(device)
 
-            # Перемещение на GPU
-            adj, features = adj.to(device), features.to(device)
-            edge_index, _ = dense_to_sparse(adj)  # Преобразование adj в edge_index
+            # Прогоняем через модель
+            emb_anchor = model(anchor_batch.x, anchor_batch.edge_index, anchor_batch.batch)
+            emb_pos    = model(pos_batch.x,    pos_batch.edge_index,    pos_batch.batch)
+            emb_neg    = model(neg_batch.x,    neg_batch.edge_index,    neg_batch.batch)
 
-            anchor = model(features, edge_index)
-
-            positive_index, negative_index = get_positive_and_negative(
-                discrete_diversity_matrix, index, train_loader.dataset
-            )
-            if positive_index is None or negative_index is None:
-                continue
-
-            positive_adj, positive_feat, *_ = train_loader.dataset[positive_index]
-            negative_adj, negative_feat, *_ = train_loader.dataset[negative_index]
-
-            # Перемещение положительных и отрицательных примеров на GPU
-            positive_adj, positive_feat = positive_adj.to(device), positive_feat.to(
-                device
-            )
-            negative_adj, negative_feat = negative_adj.to(device), negative_feat.to(
-                device
-            )
-
-            positive_edge_index, _ = dense_to_sparse(positive_adj)
-            negative_edge_index, _ = dense_to_sparse(negative_adj)
-
-            positive = model(positive_feat, positive_edge_index)
-            negative = model(negative_feat, negative_edge_index)
-
-            loss = criterion(anchor, positive, negative)
+            # Считаем loss, backward, step
+            loss = criterion(emb_anchor, emb_pos, emb_neg)
             loss.backward()
             optimizer.step()
 
-            train_loss += loss.item()
+            running_loss += loss.item()
+            n_batches += 1
 
         scheduler.step()
-
-        avg_train_loss = train_loss / len(train_loader)
+        avg_train_loss = running_loss / max(1, n_batches)
         train_losses.append(avg_train_loss)
 
-        # Оценка на валидации
+        # --------------------
+        # 2) Валидация
+        # --------------------
         model.eval()
-        valid_loss = 0
+        val_loss = 0.0
+        n_val_batches = 0
+
         with torch.no_grad():
-            for i, (adj, features, index, _) in enumerate(valid_loader):
+            for i, (anchor_batch, pos_batch, neg_batch, idx_triplet) in enumerate(valid_loader):
                 if developer_mode and i > 0:
-                    break  # Only process one batch in developer mode
+                    break
 
-                adj, features = adj.to(device), features.to(device)
-                edge_index, _ = dense_to_sparse(adj)  # Преобразование adj в edge_index
+                # перенос на device
+                anchor_batch = anchor_batch.to(device)
+                pos_batch    = pos_batch.to(device)
+                neg_batch    = neg_batch.to(device)
 
-                anchor = model(features, edge_index)
+                emb_anchor = model(anchor_batch.x, anchor_batch.edge_index, anchor_batch.batch)
+                emb_pos    = model(pos_batch.x,    pos_batch.edge_index,    pos_batch.batch)
+                emb_neg    = model(neg_batch.x,    neg_batch.edge_index,    neg_batch.batch)
 
-                positive_index, negative_index = get_positive_and_negative(
-                    discrete_diversity_matrix, index, valid_loader.dataset
-                )
-                if positive_index is None or negative_index is None:
-                    continue
+                loss = criterion(emb_anchor, emb_pos, emb_neg)
+                val_loss += loss.item()
+                n_val_batches += 1
 
-                positive_adj, positive_feat, *_ = valid_loader.dataset[positive_index]
-                negative_adj, negative_feat, *_ = valid_loader.dataset[negative_index]
-
-                positive_adj, positive_feat = positive_adj.to(device), positive_feat.to(
-                    device
-                )
-                negative_adj, negative_feat = negative_adj.to(device), negative_feat.to(
-                    device
-                )
-
-                positive_edge_index, _ = dense_to_sparse(positive_adj)
-                negative_edge_index, _ = dense_to_sparse(negative_adj)
-
-                positive = model(positive_feat, positive_edge_index)
-                negative = model(negative_feat, negative_edge_index)
-
-                loss = criterion(anchor, positive, negative)
-                valid_loss += loss.item()
-
-        avg_valid_loss = valid_loss / len(valid_loader)
+        avg_valid_loss = val_loss / max(1, n_val_batches)
         valid_losses.append(avg_valid_loss)
 
+        # --------------------
+        # 3) Лог и визуализация
+        # --------------------
         try:
             from IPython.display import clear_output
-
             clear_output(wait=True)
-        except:
+        except ImportError:
             pass
 
-        plt.figure(figsize=(12, 6))
-
-        plt.rc('font', size=16)          # controls default text sizes
-        plt.rc('axes', titlesize=16)     # fontsize of the axes title
-        plt.rc('axes', labelsize=16)    # fontsize of the x and y labels
-        plt.rc('xtick', labelsize=16)    # fontsize of the tick labels
-        plt.rc('ytick', labelsize=16)    # fontsize of the tick labels
-        plt.rc('legend', fontsize=16)    # legend fontsize
-        plt.rc('figure', titlesize=16)   # fontsize of the figure title
-
-        plt.plot(
-            range(1, len(train_losses) + 1),
-            train_losses,
-            marker="o",
-            label="Train Loss",
-        )
-        plt.plot(
-            range(1, len(valid_losses) + 1),
-            valid_losses,
-            marker="o",
-            label="Valid Loss",
-        )
-        plt.xlabel("Epoch")
-        plt.ylabel("Loss")
+        plt.figure(figsize=(10, 5))
+        plt.plot(range(1, len(train_losses)+1), train_losses, marker='o', label='Train Loss')
+        plt.plot(range(1, len(valid_losses)+1), valid_losses, marker='s', label='Valid Loss')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
         plt.grid(True)
         plt.legend()
+        plt.tight_layout()
         plt.show()
 
-        print(
-            f"Epoch {epoch+1}, Train Loss: {avg_train_loss:.4f}, Valid Loss: {avg_valid_loss:.4f}, LR: {scheduler.get_last_lr()[0]:.6f}"
-        )
+        lr = scheduler.get_last_lr()[0]
+        print(f"Epoch {epoch+1}/{num_epochs} — "
+              f"Train Loss: {avg_train_loss:.4f}, Valid Loss: {avg_valid_loss:.4f}, LR: {lr:.6f}")
 
     return train_losses, valid_losses
-
 
 def train_model_accuracy(
     model,
@@ -406,117 +443,128 @@ def train_model_accuracy(
     for epoch in tqdm(range(num_epochs), desc="Training Progress"):
         model.train()
         train_loss = 0
+        n_train_batches = 0
 
-        for i, (adj, features, _, accuracy) in enumerate(train_loader):
+        for i, data in enumerate(train_loader):
             if developer_mode and i > 0:
-                break  # Only process one batch in developer mode
+                break
 
+            data = data.to(device)
             optimizer.zero_grad()
 
-            adj = adj.to(device)
-            features = features.to(device)
-            accuracy = accuracy.to(device).float()
+            # Явно передаем `edge_index` и `x`
+            prediction = model(data.x, data.edge_index, data.batch).squeeze()  
+            target = data.y.float()
 
-            edge_index, _ = dense_to_sparse(adj)
-            prediction = model(features, edge_index).squeeze()
-
-            loss = criterion(prediction, accuracy)
+            loss = criterion(prediction, target)
             loss.backward()
             optimizer.step()
 
             train_loss += loss.item()
+            n_train_batches += 1
 
         scheduler.step()
-
-        avg_train_loss = train_loss / len(train_loader)
+        avg_train_loss = train_loss / max(1, n_train_batches)
         train_losses.append(avg_train_loss)
 
         # Validation
         model.eval()
         valid_loss = 0
+        n_val_batches = 0
+
         with torch.no_grad():
-            for i, (adj, features, _, accuracy) in enumerate(valid_loader):
+            for i, data in enumerate(valid_loader):
                 if developer_mode and i > 0:
-                    break  # Only process one batch in developer mode
+                    break
 
-                adj = adj.to(device)
-                features = features.to(device)
-                accuracy = accuracy.to(device).float()
+                data = data.to(device)
 
-                edge_index, _ = dense_to_sparse(adj)
-                prediction = model(features, edge_index).squeeze()
+                prediction = model(data.x, data.edge_index, data.batch).squeeze()
+                target = data.y.float()
 
-                loss = criterion(prediction, accuracy)
+                loss = criterion(prediction, target)
                 valid_loss += loss.item()
+                n_val_batches += 1
 
-        avg_valid_loss = valid_loss / len(valid_loader)
+        avg_valid_loss = valid_loss / max(1, n_val_batches)
         valid_losses.append(avg_valid_loss)
 
         try:
             from IPython.display import clear_output
-
             clear_output(wait=True)
         except:
             pass
 
         plt.figure(figsize=(12, 6))
-
-        plt.rc('font', size=16)          # controls default text sizes
-        plt.rc('axes', titlesize=16)     # fontsize of the axes title
-        plt.rc('axes', labelsize=16)    # fontsize of the x and y labels
-        plt.rc('xtick', labelsize=16)    # fontsize of the tick labels
-        plt.rc('ytick', labelsize=16)    # fontsize of the tick labels
-        plt.rc('legend', fontsize=16)    # legend fontsize
-        plt.rc('figure', titlesize=16)   # fontsize of the figure title
-
-        plt.plot(
-            range(1, len(train_losses) + 1),
-            train_losses,
-            marker="o",
-            label="Train Loss",
-        )
-        plt.plot(
-            range(1, len(valid_losses) + 1),
-            valid_losses,
-            marker="o",
-            label="Valid Loss",
-        )
+        plt.plot(range(1, len(train_losses) + 1), train_losses, marker="o", label="Train Loss")
+        plt.plot(range(1, len(valid_losses) + 1), valid_losses, marker="o", label="Valid Loss")
         plt.xlabel("Epoch")
         plt.ylabel("Loss")
-        plt.ylim(0, 0.002)
+        # plt.ylim(0, 0.002)
         plt.grid(True)
         plt.legend()
         plt.show()
 
-        print(
-            f"Epoch {epoch+1}, Train Loss: {avg_train_loss:.4f}, Valid Loss: {avg_valid_loss:.4f}, LR: {scheduler.get_last_lr()[0]:.6f}"
-        )
+        lr = scheduler.get_last_lr()[0]
+        print(f"Epoch {epoch+1}, Train Loss: {avg_train_loss:.4f}, "
+              f"Valid Loss: {avg_valid_loss:.4f}, LR: {lr:.6f}")
 
     return train_losses, valid_losses
 
+def get_positive_and_negative(diversity_matrix, indices, dataset=None):
+    positive_indices = []
+    negative_indices = []
 
-def get_positive_and_negative(diversity_matrix, index, dataset=None):
-    positive = np.where(
-        (diversity_matrix[index, :] == 1) & (np.arange(len(diversity_matrix)) != index)
-    )[0].tolist()
-    negative = np.where(diversity_matrix[index, :] == -1)[0].tolist()
+    for index in indices:
+        positive = np.where(
+            (diversity_matrix[index, :] == 1) & (np.arange(len(diversity_matrix)) != index)
+        )[0].tolist()
+        negative = np.where(diversity_matrix[index, :] == -1)[0].tolist()
 
-    if dataset is not None:
-        appropriate_indexes = [dataset[i][2] for i in range(len(dataset))]
+        if dataset is not None:
+            appropriate_indexes = [dataset[i][2] for i in range(len(dataset))]
 
-        positive = [
-            appropriate_indexes.index(idx)
-            for idx in positive
-            if idx in appropriate_indexes
-        ]
-        negative = [
-            appropriate_indexes.index(idx)
-            for idx in negative
-            if idx in appropriate_indexes
-        ]
+            positive = [
+                appropriate_indexes.index(idx)
+                for idx in positive
+                if idx in appropriate_indexes
+            ]
+            negative = [
+                appropriate_indexes.index(idx)
+                for idx in negative
+                if idx in appropriate_indexes
+            ]
 
-    if not positive or not negative:
-        print("Both positive and negative samples are empty!")
-        return None, None
+        if not positive or not negative:
+            print(f"Positive or negative samples are empty for index {index}!")
+            positive_indices.append(None)
+            negative_indices.append(None)
+        else:
+            # Выбираем случайный положительный и отрицательный пример
+            positive_indices.append(np.random.choice(positive))
+            negative_indices.append(np.random.choice(negative))
 
-    return np.random.choice(positive), np.random.choice(negative)
+    return positive_indices, negative_indices
+
+def extract_embeddings(model, data_loader, device, use_tqdm=True):
+    model.to(device)
+    model.eval()
+    embeddings = []
+    indices = []
+
+    iterator = tqdm(data_loader) if use_tqdm else data_loader
+
+    with torch.no_grad():
+        for batch in iterator:
+            if isinstance(batch, tuple):
+                batch = batch[0]
+            batch = batch.to(device)
+
+            batch_embeddings = model(batch.x, batch.edge_index, batch.batch)
+
+            embeddings.append(batch_embeddings.cpu().numpy())
+            indices.append(batch.index.cpu().numpy())
+
+    embeddings = np.vstack(embeddings).squeeze()
+    indices = np.concatenate(indices)
+    return embeddings, indices
