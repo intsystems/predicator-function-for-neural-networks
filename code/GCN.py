@@ -89,7 +89,7 @@ class GCN(nn.Module):
         self.residual_proj = (
             nn.Linear(input_dim, self.hidden_dim) if input_dim != self.hidden_dim else nn.Identity()
         )
-
+        
         self.layer_norm = nn.LayerNorm(self.hidden_dim)
         self.dropout = nn.Dropout(dropout)
         self.pooling = pooling
@@ -121,7 +121,7 @@ class GCN(nn.Module):
         elif self.pooling == "mean":
             x = global_mean_pool(x, batch)
         elif self.pooling == "sum":
-            x = torch.sum(x, dim=0)
+            x = global_add_pool(x, batch)
         else:
             raise ValueError("Unsupported pooling method. Use 'max', 'mean' or 'sum'.")
 
@@ -133,6 +133,7 @@ class GCN(nn.Module):
         if self.output_dim == 1:
             x = torch.sigmoid(x)
         return x
+
 
 class SimpleGAT(nn.Module):
     def __init__(
@@ -443,7 +444,7 @@ def train_model_accuracy(
     for epoch in tqdm(range(num_epochs), desc="Training Progress"):
         model.train()
         train_loss = 0
-        n_train_batches = 0
+        n_train_samples = 0  # изменено: считаем количество графов, а не батчей
 
         for i, data in enumerate(train_loader):
             if developer_mode and i > 0:
@@ -452,25 +453,24 @@ def train_model_accuracy(
             data = data.to(device)
             optimizer.zero_grad()
 
-            # Явно передаем `edge_index` и `x`
-            prediction = model(data.x, data.edge_index, data.batch).squeeze()  
+            prediction = model(data.x, data.edge_index, data.batch).squeeze()
             target = data.y.float()
 
             loss = criterion(prediction, target)
             loss.backward()
             optimizer.step()
 
-            train_loss += loss.item()
-            n_train_batches += 1
+            train_loss += loss.item() * data.num_graphs  # весим loss по числу графов
+            n_train_samples += data.num_graphs
 
         scheduler.step()
-        avg_train_loss = train_loss / max(1, n_train_batches)
+        avg_train_loss = train_loss / max(1, n_train_samples)
         train_losses.append(avg_train_loss)
 
         # Validation
         model.eval()
         valid_loss = 0
-        n_val_batches = 0
+        n_val_samples = 0
 
         with torch.no_grad():
             for i, data in enumerate(valid_loader):
@@ -483,10 +483,10 @@ def train_model_accuracy(
                 target = data.y.float()
 
                 loss = criterion(prediction, target)
-                valid_loss += loss.item()
-                n_val_batches += 1
+                valid_loss += loss.item() * data.num_graphs
+                n_val_samples += data.num_graphs
 
-        avg_valid_loss = valid_loss / max(1, n_val_batches)
+        avg_valid_loss = valid_loss / max(1, n_val_samples)
         valid_losses.append(avg_valid_loss)
 
         try:
@@ -496,11 +496,13 @@ def train_model_accuracy(
             pass
 
         plt.figure(figsize=(12, 6))
-        plt.plot(range(1, len(train_losses) + 1), train_losses, marker="o", label="Train Loss")
-        plt.plot(range(1, len(valid_losses) + 1), valid_losses, marker="o", label="Valid Loss")
+        tmp_train_losses = np.array(train_losses)
+        tmp_valid_losses = np.array(valid_losses)
+        plt.plot(range(1, len(tmp_train_losses) + 1), tmp_train_losses * 1e4, marker="o", label="Train Loss")
+        plt.plot(range(1, len(tmp_valid_losses) + 1), tmp_valid_losses * 1e4, marker="o", label="Valid Loss")
         plt.xlabel("Epoch")
-        plt.ylabel("Loss")
-        # plt.ylim(0, 0.002)
+        plt.ylabel("Loss * 1e4")
+        plt.ylim(0, 10)
         plt.grid(True)
         plt.legend()
         plt.show()
