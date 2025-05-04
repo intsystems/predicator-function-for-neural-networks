@@ -20,9 +20,7 @@ from torch_geometric.data import Data, Batch
 from torch_geometric.loader import DataLoader
 
 class SimpleGCN(nn.Module):
-    def __init__(
-        self, input_dim, hidden_dim, embedding_dim, dropout=0.5, pooling="max"
-    ):
+    def __init__(self, input_dim, embedding_dim, hidden_dim=64, dropout=0.5, pooling="max"):
         """
         input_dim: размер входных признаков узлов
         hidden_dim: размер скрытого пространства в графовых свёрточных слоях
@@ -35,16 +33,18 @@ class SimpleGCN(nn.Module):
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.embedding_dim = embedding_dim
+        self.pooling = pooling
 
         self.gc1 = GCNConv(input_dim, hidden_dim)
         self.gc2 = GCNConv(hidden_dim, hidden_dim)
+
         self.graph_norm = GraphNorm(hidden_dim)
         self.layer_norm = nn.LayerNorm(hidden_dim)
         self.dropout = nn.Dropout(dropout)
-        self.pooling = pooling
+
         self.fc = nn.Linear(hidden_dim, embedding_dim)
 
-    def forward(self, x, edge_index):
+    def forward(self, x, edge_index, batch=None):
         x = F.relu(self.gc1(x, edge_index))
         x = self.graph_norm(x)
         x = self.layer_norm(x)
@@ -55,22 +55,21 @@ class SimpleGCN(nn.Module):
         x = self.layer_norm(x)
         x = self.dropout(x)
 
-        # Глобальное агрегирование узловых признаков для получения представления всего графа
+        # Пулинг по графу
         if self.pooling == "max":
-            pooled = torch.max(x, dim=0).values
+            x = global_max_pool(x, batch)
         elif self.pooling == "mean":
-            pooled = torch.mean(x, dim=0)
+            x = global_mean_pool(x, batch)
         elif self.pooling == "sum":
-            pooled = torch.sum(x, dim=0)
+            x = global_add_pool(x, batch)
         else:
-            raise ValueError("Unsupported pooling method. Use 'max', 'mean' или 'sum'.")
+            raise ValueError("Unsupported pooling method. Use 'max', 'mean' or 'sum'.")
 
-        # Преобразование агрегированного представления в эмбеддинг графа
-        embedding = self.fc(pooled)
+        x = self.fc(x)
 
         if self.embedding_dim == 1:
-            embedding = nn.Sigmoid()(embedding)
-        return embedding
+            x = torch.sigmoid(x)
+        return x
 
 
 class GCN(nn.Module):
@@ -135,70 +134,85 @@ class GCN(nn.Module):
         return x
 
 
-class SimpleGAT(nn.Module):
-    def __init__(
-        self,
-        input_dim,
-        embed_dim,
-        hidden_dim,
-        out_dim,
-        dropout=0.5,
-        pooling="max",
-        heads=1,
-    ):
-        """
-        input_dim: размер one-hot признаков узлов
-        embed_dim: размер обучаемого эмбеддинга узлов
-        hidden_dim: скрытое пространство для GAT
-        out_dim: размер итогового графового эмбеддинга
-        pooling: 'max', 'mean', или 'sum'
-        """
-        super(SimpleGAT, self).__init__()
+class GAT(nn.Module):
+    def __init__(self, input_dim, output_dim=16, dropout=0.5, pooling="max", heads=4):
+        super(GAT, self).__init__()
 
-        self.pooling = pooling
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+        self.hidden_dim = 64  # базовая размерность скрытого слоя
+        self.heads = heads
+
+        # Attention Conv слои
+        self.gat1 = GATConv(input_dim, self.hidden_dim // heads, heads=heads)
+        self.gat2 = GATConv(self.hidden_dim, 256 // heads, heads=heads)
+        self.gat3 = GATConv(256, 256 // heads, heads=heads)
+        self.gat4 = GATConv(256, self.hidden_dim // heads, heads=heads)
+
+        # Проекции для full residual
+        self.res1 = nn.Linear(input_dim, self.hidden_dim)
+        self.res2 = nn.Linear(self.hidden_dim, 256)
+        self.res3 = nn.Linear(256, 256)
+        self.res4 = nn.Linear(256, self.hidden_dim)
+
+        # Нормализация после каждого блока
+        self.norm1 = GraphNorm(self.hidden_dim)
+        self.norm2 = GraphNorm(256)
+        self.norm3 = GraphNorm(256)
+        self.norm4 = GraphNorm(self.hidden_dim)
+
         self.dropout = nn.Dropout(dropout)
+        self.pooling = pooling
 
-        self.node_encoder = nn.Linear(
-            input_dim, embed_dim
-        )  # обучаемый слой проекции one-hot -> dense
-
-        self.gat1 = GATConv(embed_dim, hidden_dim, heads=heads, concat=True)
-        self.norm1 = GraphNorm(hidden_dim * heads)
-
-        self.gat2 = GATConv(hidden_dim * heads, hidden_dim, heads=heads, concat=True)
-        self.norm2 = GraphNorm(hidden_dim * heads)
-
-        self.fc = nn.Linear(hidden_dim * heads, out_dim)
+        # Полносвязная часть для графового эмбеддинга
+        self.fc1 = nn.Linear(self.hidden_dim, self.hidden_dim)
+        self.fc_norm = nn.LayerNorm(self.hidden_dim)
+        self.fc2 = nn.Linear(self.hidden_dim, output_dim)
 
     def forward(self, x, edge_index, batch=None):
-        x = self.node_encoder(x)
-        x = F.elu(self.gat1(x, edge_index))
-        x = self.norm1(x)
-        x = self.dropout(x)
+        # Layer 1
+        h1 = self.gat1(x, edge_index)
+        h1 = F.leaky_relu(h1 + self.res1(x))
+        h1 = self.norm1(h1)
+        h1 = self.dropout(h1)
 
-        x = F.elu(self.gat2(x, edge_index))
-        x = self.norm2(x)
-        x = self.dropout(x)
+        # Layer 2
+        h2 = self.gat2(h1, edge_index)
+        h2 = F.leaky_relu(h2 + self.res2(h1))
+        h2 = self.norm2(h2)
+        h2 = self.dropout(h2)
 
-        # Пуллинг по графу (поддержка батча)
-        if batch is None:
-            batch = torch.zeros(x.size(0), dtype=torch.long, device=x.device)
+        # Layer 3
+        h3 = self.gat3(h2, edge_index)
+        h3 = F.leaky_relu(h3 + self.res3(h2))
+        h3 = self.norm3(h3)
+        h3 = self.dropout(h3)
 
+        # Layer 4
+        h4 = self.gat4(h3, edge_index)
+        h4 = F.leaky_relu(h4 + self.res4(h3))
+        h4 = self.norm4(h4)
+        h4 = self.dropout(h4)
+
+        # Глобальное агрегирование
         if self.pooling == "max":
-            pooled = global_max_pool(x, batch)
+            hg = global_max_pool(h4, batch)
         elif self.pooling == "mean":
-            pooled = global_mean_pool(x, batch)
+            hg = global_mean_pool(h4, batch)
         elif self.pooling == "sum":
-            pooled = global_add_pool(x, batch)
+            hg = global_add_pool(h4, batch)
         else:
             raise ValueError("Unsupported pooling method. Use 'max', 'mean' or 'sum'.")
 
-        embedding = self.fc(pooled)
+        # Финальный MLP
+        out = self.fc1(hg)
+        out = self.fc_norm(out)
+        out = F.leaky_relu(out)
+        out = self.fc2(out)
+        if self.output_dim == 1:
+            out = torch.sigmoid(out)
+        return out
 
-        if self.fc.out_features == 1:
-            embedding = torch.sigmoid(embedding)
-
-        return embedding
 
 class CustomDataset(Dataset):
     @staticmethod
