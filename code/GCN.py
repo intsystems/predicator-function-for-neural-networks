@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from torch_geometric.nn import (
     GCNConv,
     GATConv,
+    GATv2Conv,
     global_max_pool,
     global_mean_pool,
     global_add_pool,
@@ -11,7 +12,7 @@ from torch_geometric.nn import (
 )
 from torch_geometric.utils import dense_to_sparse
 from torch.optim.lr_scheduler import StepLR
-from tqdm import tqdm
+from tqdm.notebook import tqdm
 import matplotlib.pyplot as plt
 import numpy as np
 from torch.utils.data import Dataset
@@ -144,10 +145,10 @@ class GAT(nn.Module):
         self.heads = heads
 
         # Attention Conv слои
-        self.gat1 = GATConv(input_dim, self.hidden_dim // heads, heads=heads)
-        self.gat2 = GATConv(self.hidden_dim, 256 // heads, heads=heads)
-        self.gat3 = GATConv(256, 256 // heads, heads=heads)
-        self.gat4 = GATConv(256, self.hidden_dim // heads, heads=heads)
+        self.gat1 = GATv2Conv(input_dim, self.hidden_dim // heads, heads=heads)
+        self.gat2 = GATv2Conv(self.hidden_dim, 256 // heads, heads=heads)
+        self.gat3 = GATv2Conv(256, 256 // heads, heads=heads)
+        self.gat4 = GATv2Conv(256, self.hidden_dim // heads, heads=heads)
 
         # Проекции для full residual
         self.res1 = nn.Linear(input_dim, self.hidden_dim)
@@ -522,8 +523,8 @@ def train_model_accuracy(
         plt.show()
 
         lr = scheduler.get_last_lr()[0]
-        print(f"Epoch {epoch+1}, Train Loss: {avg_train_loss:.4f}, "
-              f"Valid Loss: {avg_valid_loss:.4f}, LR: {lr:.6f}")
+        print(f"Epoch {epoch+1}, Train Loss: {avg_train_loss * 1e4:.4f}, "
+              f"Valid Loss: {avg_valid_loss * 1e4:.4f}, LR: {lr:.6f}")
 
     return train_losses, valid_losses
 
