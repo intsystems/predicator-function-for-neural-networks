@@ -11,11 +11,20 @@ from nni.nas.hub.pytorch import DARTS as DartsSpace
 from nni.nas.space import model_context
 from tqdm import tqdm
 from IPython.display import clear_output
+from nni.nas.evaluator.pytorch import Lightning, Trainer
 
-ARCHITECTURES_PATH = "best_models"
-MAX_EPOCHS = 50
-LEARNING_RATE = 1e-3
-BATCH_SIZE = 256
+from data_generator import generate_arch_dicts
+from darts_classification_module import DartsClassificationModule
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+TEST = False
+
+
+ARCHITECTURES_PATH = "/kaggle/input/second-dataset/dataset"
+MAX_EPOCHS = 70
+LEARNING_RATE = 0.025
+BATCH_SIZE = 96
+NUM_MODLES = 2000
 CIFAR_MEAN = [0.49139968, 0.48215827, 0.44653124]
 CIFAR_STD = [0.24703233, 0.24348505, 0.26158768]
 
@@ -81,119 +90,116 @@ def get_data_loaders(batch_size=512):
 
 
 def train_model(
-    architecture, train_loader, valid_loader, max_epochs=10, learning_rate=1e-3
+    architecture, 
+    train_loader, 
+    valid_loader, 
+    max_epochs=600, 
+    learning_rate=0.025,
+    fast_dev_run=False
 ):
-    """
-    Обучает модель на основе заданной архитектуры и данных.
-    Параметры:
-    architecture (str): Архитектура модели, которая будет использоваться.
-    train_loader (DataLoader): DataLoader для обучающих данных.
-    valid_loader (DataLoader): DataLoader для валидационных данных.
-    max_epochs (int, необязательно): Максимальное количество эпох для обучения. По умолчанию 10.
-    learning_rate (float, необязательно): Скорость обучения. По умолчанию 1e-3.
-    Возвращает:
-    model: Обученная модель.
-    """
     with model_context(architecture):
-        model = DartsSpace(width=16, num_cells=3, dataset="cifar")
-
+        model = DartsSpace(width=16, num_cells=10, dataset='cifar')
+    
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if torch.cuda.device_count() > 1:
-        model = torch.nn.DataParallel(model)  # Enable multi-GPU training
-
+        model = torch.nn.DataParallel(model)
     model.to(device)
 
-    evaluator = Classification(
-        learning_rate=learning_rate,
-        weight_decay=1e-4,
+    evaluator = Lightning(
+        DartsClassificationModule(
+            learning_rate=learning_rate,
+            weight_decay=3e-4,
+            auxiliary_loss_weight=0.4,
+            max_epochs=max_epochs
+        ),
+        trainer=Trainer(
+            gradient_clip_val=5.0,
+            max_epochs=max_epochs,
+            fast_dev_run=fast_dev_run
+        ),
         train_dataloaders=train_loader,
-        val_dataloaders=valid_loader,
-        max_epochs=max_epochs,
-        num_classes=10,
-        export_onnx=False,  # Disable ONNX export for this experiment
-        fast_dev_run=False,  # Should be false for fully training
+        val_dataloaders=valid_loader
     )
 
     evaluator.fit(model)
     return model
 
+
 def evaluate_and_save_results(
-    models, architectures, valid_loader, folder_name="results"
+    model,
+    architecture,
+    model_id,  # Новый обязательный параметр для идентификации модели
+    valid_loader,
+    folder_name="results"
 ):
     """
-    Оценивает модели на валидационном наборе данных и сохраняет результаты в файлы JSON.
+    Оценивает модель на валидационном наборе данных и сохраняет результаты в JSON.
     Аргументы:
-    models (list): Список обученных моделей.
-    architectures (list): Список архитектур моделей.
-    valid_loader (DataLoader): DataLoader для валидационных данных.
-    folder_name (str, необязательно): Имя папки для сохранения результатов. По умолчанию "results".
-    Исключения:
-    ValueError: Если количество моделей и архитектур не совпадает.
-    Результаты:
-    Для каждой модели создается файл JSON с результатами, содержащий:
-    - architecture: Архитектура модели.
-    - valid_predictions: Предсказания модели на валидационном наборе данных.
-    - valid_accuracy: Точность модели на валидационном наборе данных.
+    model: Обученная модель
+    architecture: Архитектура модели
+    valid_loader (DataLoader): DataLoader для валидационных данных
+    model_id: Уникальный идентификатор модели
+    folder_name (str): Папка для сохранения результатов
     """
-    if len(models) != len(architectures):
-        raise ValueError("Количество моделей и архитектур должно совпадать")
-
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     os.makedirs(folder_name, exist_ok=True)
 
-    for i, (model, architecture) in enumerate(zip(models, architectures)):
-        model.to(device)
-        model.eval()
+    # Перенос модели на устройство и режим оценки
+    model.to(device)
+    model.eval()
 
-        valid_correct = 0
-        valid_total = 0
-        valid_preds = []
+    valid_correct = 0
+    valid_total = 0
+    valid_preds = []
 
-        with torch.no_grad():
-            for images, labels in valid_loader:
-                images, labels = images.to(device), labels.to(device)
-                outputs = model(images)
-                outputs = torch.softmax(outputs, dim = 1)
-                valid_preds.extend(outputs.cpu().tolist())  
-                _, predicted = torch.max(outputs, 1)
-                valid_correct += (predicted == labels).sum().item()
-                valid_total += labels.size(0)
+    with torch.no_grad():
+        for images, labels in valid_loader:
+            images, labels = images.to(device), labels.to(device)
+            outputs = model(images)
+            outputs = torch.softmax(outputs, dim=1)
+            valid_preds.extend(outputs.cpu().tolist())
+            _, predicted = torch.max(outputs, 1)
+            valid_correct += (predicted == labels).sum().item()
+            valid_total += labels.size(0)
 
-        valid_accuracy = valid_correct / valid_total
+    valid_accuracy = valid_correct / valid_total
 
-        result = {
-            "architecture": architecture,
-            "valid_predictions": valid_preds,
-            "valid_accuracy": valid_accuracy,
-        }
+    # Формирование результата
+    result = {
+        "architecture": architecture,
+        "valid_predictions": valid_preds,
+        "valid_accuracy": valid_accuracy,
+    }
 
-        file_name = f"model_{i+1}_results.json"
-        file_path = os.path.join(folder_name, file_name)
+    # Генерация имени файла с использованием model_id
+    file_name = f"model_{model_id}_results.json"
+    file_path = os.path.join(folder_name, file_name)
 
-        with open(file_path, "w") as f:
-            json.dump(result, f, indent=4)
+    # Сохранение результатов
+    with open(file_path, "w") as f:
+        json.dump(result, f, indent=4)
 
-        print(f"Results for model_{i + 1} saved to {file_path}")
-
+    print(f"Results for model_{model_id} saved to {file_path}")
 
 
 if __name__ == "__main__":
-    arch_dicts = load_json_from_directory(ARCHITECTURES_PATH)  # Загружаем словари архитектур
-    print(arch_dicts)
-    # search_train_loader, search_valid_loader = get_data_loaders(
-    #     batch_size=BATCH_SIZE
-    # )  # Получаем загрузчики CIFAR10
+    arch_dicts = generate_arch_dicts(NUM_MODLES)
+    arch_dicts = [tmp_arch["architecture"] for tmp_arch in arch_dicts]
+    search_train_loader, search_valid_loader = get_data_loaders(
+        batch_size=BATCH_SIZE
+    )  # Получаем загрузчики CIFAR10
 
-    # for architecture in tqdm(arch_dicts):
-    #     model = train_model(  # Обучаем модель
-    #         architecture,
-    #         search_train_loader,
-    #         search_valid_loader,
-    #         max_epochs=MAX_EPOCHS,
-    #         learning_rate=LEARNING_RATE,
-    #     )
-    #     clear_output(wait=True)
+    for idx, architecture in enumerate(tqdm(arch_dicts)):
+        model = train_model(  # Обучаем модель
+            architecture,
+            search_train_loader,
+            search_valid_loader,
+            max_epochs=MAX_EPOCHS,
+            learning_rate=LEARNING_RATE,
+            fast_dev_run=False
+        )
+        clear_output(wait=True)
         
-    #     evaluate_and_save_results(
-    #         [model], [architecture], valid_loader=search_valid_loader, folder_name="results"
-    #     )  # Оцениваем и сохраняем архитектуры, предсказания на тестовом наборе CIFAR10 и accuracy
+        evaluate_and_save_results(
+            model, architecture, idx, valid_loader=search_valid_loader, folder_name="results"
+        )  # Оцениваем и сохраняем архитектуры, предсказания на тестовом наборе CIFAR10 и accuracy
