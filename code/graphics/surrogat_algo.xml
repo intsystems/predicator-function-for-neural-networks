@@ -1,0 +1,66 @@
+<mxfile host="app.diagrams.net">
+  <diagram name="Surrogate Training Flow" id="d1">
+    <mxGraphModel dx="1420" dy="728" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <!-- Start -->
+        <mxCell id="2" value="Start" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffcccc;" vertex="1" parent="1">
+          <mxGeometry x="240" y="20" width="140" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- Init model -->
+        <mxCell id="3" value="Initialize model f_sim" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;" vertex="1" parent="1">
+          <mxGeometry x="240" y="100" width="140" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- Pick architecture -->
+        <mxCell id="4" value="Pick an architecture" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;" vertex="1" parent="1">
+          <mxGeometry x="240" y="180" width="140" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- Sample pair -->
+        <mxCell id="5" value="Choose positive and negative pair" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;" vertex="1" parent="1">
+          <mxGeometry x="240" y="260" width="200" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- Embeddings -->
+        <mxCell id="6" value="Compute embeddings" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;" vertex="1" parent="1">
+          <mxGeometry x="240" y="340" width="140" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- Loss -->
+        <mxCell id="7" value="Calculate triplet loss" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;" vertex="1" parent="1">
+          <mxGeometry x="240" y="420" width="160" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- Update -->
+        <mxCell id="8" value="Update model weights" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;" vertex="1" parent="1">
+          <mxGeometry x="240" y="500" width="160" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- Repeat -->
+        <mxCell id="9" value="Repeat steps as needed" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;" vertex="1" parent="1">
+          <mxGeometry x="240" y="580" width="160" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- Return -->
+        <mxCell id="10" value="Return f_sim" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffcccc;" vertex="1" parent="1">
+          <mxGeometry x="240" y="660" width="140" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- Edges -->
+        <mxCell id="11" style="endArrow=block;html=1;" edge="1" parent="1" source="2" target="3"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="12" style="endArrow=block;html=1;" edge="1" parent="1" source="3" target="4"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="13" style="endArrow=block;html=1;" edge="1" parent="1" source="4" target="5"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="14" style="endArrow=block;html=1;" edge="1" parent="1" source="5" target="6"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="15" style="endArrow=block;html=1;" edge="1" parent="1" source="6" target="7"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="16" style="endArrow=block;html=1;" edge="1" parent="1" source="7" target="8"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="17" style="endArrow=block;html=1;" edge="1" parent="1" source="8" target="9"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="18" style="endArrow=block;html=1;" edge="1" parent="1" source="9" target="10"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
