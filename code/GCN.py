@@ -11,7 +11,7 @@ from torch_geometric.nn import (
     GraphNorm,
 )
 from torch_geometric.utils import dense_to_sparse
-from torch.optim.lr_scheduler import StepLR
+from torch.optim.lr_scheduler import StepLR, CosineAnnealingLR
 from tqdm.notebook import tqdm
 import matplotlib.pyplot as plt
 import numpy as np
@@ -347,10 +347,11 @@ def train_model_diversity(
     num_epochs,
     device="cpu",
     developer_mode=False,
+    final_lr=0.001
 ):
     model.to(device)
     train_losses, valid_losses = [], []
-    scheduler = StepLR(optimizer, step_size=5, gamma=0.5)
+    scheduler = CosineAnnealingLR(optimizer, num_epochs, eta_min=final_lr)
 
     for epoch in tqdm(range(num_epochs), desc="Training Progress"):
         # --------------------
@@ -424,7 +425,8 @@ def train_model_diversity(
         except ImportError:
             pass
 
-        plt.figure(figsize=(10, 5))
+        plt.figure(figsize=(12, 6))
+        plt.rc('font', size=20)
         plt.plot(range(1, len(train_losses)+1), train_losses, marker='o', label='Train Loss')
         plt.plot(range(1, len(valid_losses)+1), valid_losses, marker='s', label='Valid Loss')
         plt.xlabel('Epoch')
@@ -449,12 +451,13 @@ def train_model_accuracy(
     num_epochs,
     device="cpu",
     developer_mode=False,
+    final_lr=0.001,
 ):
     model.to(device)
     train_losses = []
     valid_losses = []
 
-    scheduler = StepLR(optimizer, step_size=5, gamma=0.5)
+    scheduler = CosineAnnealingLR(optimizer, num_epochs, eta_min=final_lr)
 
     for epoch in tqdm(range(num_epochs), desc="Training Progress"):
         model.train()
@@ -511,6 +514,7 @@ def train_model_accuracy(
             pass
 
         plt.figure(figsize=(12, 6))
+        plt.rc('font', size=20)
         tmp_train_losses = np.array(train_losses)
         tmp_valid_losses = np.array(valid_losses)
         plt.plot(range(1, len(tmp_train_losses) + 1), tmp_train_losses * 1e4, marker="o", label="Train Loss")
