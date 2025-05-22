@@ -13,8 +13,8 @@ from tqdm import tqdm
 from IPython.display import clear_output
 from nni.nas.evaluator.pytorch import Lightning, Trainer
 
-from data_generator import generate_arch_dicts
-from darts_classification_module import DartsClassificationModule
+from dependecies.data_generator import generate_arch_dicts
+from dependecies.darts_classification_module import DartsClassificationModule
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 TEST = False
