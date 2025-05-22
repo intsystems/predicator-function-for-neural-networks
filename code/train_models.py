@@ -21,7 +21,7 @@ TEST = False
 
 
 ARCHITECTURES_PATH = "/kaggle/input/second-dataset/dataset"
-MAX_EPOCHS = 70
+MAX_EPOCHS = 60
 LEARNING_RATE = 0.025
 BATCH_SIZE = 96
 NUM_MODLES = 2000
@@ -78,7 +78,7 @@ def get_data_loaders(batch_size=512):
     )
     num_samples = len(train_data)
     indices = np.random.permutation(num_samples)
-    split = int(num_samples * 0.5)
+    split = int(num_samples * 0.75)
 
     search_train_loader = DataLoader(
         train_data,
@@ -106,7 +106,7 @@ def train_model(
     fast_dev_run=False
 ):
     with model_context(architecture):
-        model = DartsSpace(width=16, num_cells=3, dataset='cifar')
+        model = DartsSpace(width=16, num_cells=10, dataset='cifar')
     
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     #if torch.cuda.device_count() > 1:
