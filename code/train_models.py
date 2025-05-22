@@ -78,7 +78,7 @@ def get_data_loaders(batch_size=512):
     )
     num_samples = len(train_data)
     indices = np.random.permutation(num_samples)
-    split = int(num_samples * 0.75)
+    split = int(num_samples * 0.5)
 
     search_train_loader = DataLoader(
         train_data,
@@ -126,8 +126,8 @@ def train_model(
             fast_dev_run=fast_dev_run,
             devices=[0]
         ),
-        train_dataloaders=train_loader,
-        val_dataloaders=valid_loader
+        train_dataloaders=train_loader#,
+        #val_dataloaders=valid_loader
     )
 
     evaluator.fit(model)
