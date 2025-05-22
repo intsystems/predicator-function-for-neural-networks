@@ -3,7 +3,7 @@ import json
 import numpy as np
 import torch
 import nni
-from torch.utils.data import SubsetRandomSampler
+from torch.utils.data import SubsetRandomSampler, SequentialSampler
 from torchvision import transforms
 from torchvision.datasets import CIFAR10
 from nni.nas.evaluator.pytorch import DataLoader, Classification
@@ -21,12 +21,20 @@ TEST = False
 
 
 ARCHITECTURES_PATH = "/kaggle/input/second-dataset/dataset"
-MAX_EPOCHS = 70
+MAX_EPOCHS = 1
 LEARNING_RATE = 0.025
 BATCH_SIZE = 96
 NUM_MODLES = 2000
 CIFAR_MEAN = [0.49139968, 0.48215827, 0.44653124]
 CIFAR_STD = [0.24703233, 0.24348505, 0.26158768]
+
+SEED = 228
+# random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+torch.cuda.manual_seed_all(SEED)  # если есть GPU
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
 
 
 def load_json_from_directory(directory_path):
@@ -70,7 +78,7 @@ def get_data_loaders(batch_size=512):
     )
     num_samples = len(train_data)
     indices = np.random.permutation(num_samples)
-    split = num_samples // 2
+    split = int(num_samples * 0.75)
 
     search_train_loader = DataLoader(
         train_data,
@@ -80,10 +88,10 @@ def get_data_loaders(batch_size=512):
     )
 
     search_valid_loader = DataLoader(
-        train_data,
+            train_data,
         batch_size=batch_size,
         num_workers=6,
-        sampler=SubsetRandomSampler(indices[split:]),
+        sampler=SequentialSampler(indices[split:]),
     )
 
     return search_train_loader, search_valid_loader
@@ -100,9 +108,9 @@ def train_model(
     with model_context(architecture):
         model = DartsSpace(width=16, num_cells=10, dataset='cifar')
     
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    if torch.cuda.device_count() > 1:
-        model = torch.nn.DataParallel(model)
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    #if torch.cuda.device_count() > 1:
+    #    model = torch.nn.DataParallel(model)
     model.to(device)
 
     evaluator = Lightning(
@@ -115,7 +123,8 @@ def train_model(
         trainer=Trainer(
             gradient_clip_val=5.0,
             max_epochs=max_epochs,
-            fast_dev_run=fast_dev_run
+            fast_dev_run=fast_dev_run,
+            devices=[0]
         ),
         train_dataloaders=train_loader,
         val_dataloaders=valid_loader
@@ -130,7 +139,7 @@ def evaluate_and_save_results(
     architecture,
     model_id,  # Новый обязательный параметр для идентификации модели
     valid_loader,
-    folder_name="results"
+    folder_name="results_seq_0"
 ):
     """
     Оценивает модель на валидационном наборе данных и сохраняет результаты в JSON.
@@ -154,6 +163,7 @@ def evaluate_and_save_results(
 
     with torch.no_grad():
         for images, labels in valid_loader:
+            print(labels)
             images, labels = images.to(device), labels.to(device)
             outputs = model(images)
             outputs = torch.softmax(outputs, dim=1)
@@ -201,5 +211,5 @@ if __name__ == "__main__":
         clear_output(wait=True)
         
         evaluate_and_save_results(
-            model, architecture, idx, valid_loader=search_valid_loader, folder_name="results"
+            model, architecture, idx, valid_loader=search_valid_loader, folder_name="results_seq_0"
         )  # Оцениваем и сохраняем архитектуры, предсказания на тестовом наборе CIFAR10 и accuracy
