@@ -5,9 +5,12 @@ import torch
 import nni
 from torch.utils.data import SubsetRandomSampler, SequentialSampler
 from torchvision import transforms
-from torchvision.datasets import CIFAR10
+from torchvision.datasets import CIFAR10, CIFAR100
 from nni.nas.evaluator.pytorch import DataLoader, Classification
-from nni.nas.hub.pytorch import DARTS as DartsSpace
+
+from DartsSpace import DARTS_with_CIFAR100 as DartsSpace
+
+
 from nni.nas.space import model_context
 from tqdm import tqdm
 from IPython.display import clear_output
@@ -25,8 +28,15 @@ MAX_EPOCHS = 60
 LEARNING_RATE = 0.025
 BATCH_SIZE = 96
 NUM_MODLES = 2000
-CIFAR_MEAN = [0.49139968, 0.48215827, 0.44653124]
-CIFAR_STD = [0.24703233, 0.24348505, 0.26158768]
+
+DATASET = "CIFAR100"
+
+if DATASET == "CIFAR10":
+    MEAN = [0.49139968, 0.48215827, 0.44653124]
+    STD = [0.24703233, 0.24348505, 0.26158768]
+elif DATASET == "CIFAR100":
+    MEAN = [0.5071, 0.4867, 0.4408]
+    STD = [0.2673, 0.2564, 0.2762]
 
 SEED = 228
 # random.seed(SEED)
@@ -69,13 +79,17 @@ def get_data_loaders(batch_size=512):
             transforms.RandomCrop(32, padding=4),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
-            transforms.Normalize(CIFAR_MEAN, CIFAR_STD),
+            transforms.Normalize(MEAN, STD),
         ]
     )
-
-    train_data = nni.trace(CIFAR10)(
-        root="./data", train=True, download=True, transform=transform
-    )
+    if DATASET == 'CIFAR10':
+        train_data = nni.trace(CIFAR10)(
+            root="./data", train=True, download=True, transform=transform
+        )
+    elif DATASET == 'CIFAR100':
+        train_data = nni.trace(CIFAR100)(
+            root="./data", train=True, download=True, transform=transform
+        )
     num_samples = len(train_data)
     indices = np.random.permutation(num_samples)
     split = int(num_samples * 0.5)
@@ -106,7 +120,10 @@ def train_model(
     fast_dev_run=False
 ):
     with model_context(architecture):
-        model = DartsSpace(width=16, num_cells=10, dataset='cifar')
+        if DATASET == 'CIFAR10':
+            model = DartsSpace(width=16, num_cells=10, dataset='cifar')
+        elif DATASET == 'CIFAR100':
+            model = DartsSpace(width=16, num_cells=10, dataset='cifar100')
     
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     #if torch.cuda.device_count() > 1:
@@ -182,7 +199,7 @@ def evaluate_and_save_results(
     }
 
     # Генерация имени файла с использованием model_id
-    file_name = f"model_{model_id}_results.json"
+    file_name = f"model_{model_id:04d}_results.json"
     file_path = os.path.join(folder_name, file_name)
 
     # Сохранение результатов
@@ -211,5 +228,5 @@ if __name__ == "__main__":
         clear_output(wait=True)
         
         evaluate_and_save_results(
-            model, architecture, idx, valid_loader=search_valid_loader, folder_name="results_seq_0"
+            model, architecture, idx, valid_loader=search_valid_loader, folder_name="results_cifar100"
         )  # Оцениваем и сохраняем архитектуры, предсказания на тестовом наборе CIFAR10 и accuracy
