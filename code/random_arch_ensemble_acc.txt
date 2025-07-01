@@ -23,3 +23,11 @@ Model 4 Accuracy: 92.18%
 Model 5 Accuracy: 91.99%
 Model 6 Accuracy: 91.70%
 ========================================================================
+Ensemble Accuracy: 93.61%
+Model 1 Accuracy: 91.21%
+Model 2 Accuracy: 91.49%
+Model 3 Accuracy: 90.95%
+Model 4 Accuracy: 91.34%
+Model 5 Accuracy: 90.65%
+Model 6 Accuracy: 91.37%
+========================================================================
