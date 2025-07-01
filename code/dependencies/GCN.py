@@ -20,8 +20,11 @@ from joblib import Parallel, delayed
 from torch_geometric.data import Data, Batch
 from torch_geometric.loader import DataLoader
 
+
 class SimpleGCN(nn.Module):
-    def __init__(self, input_dim, embedding_dim, hidden_dim=64, dropout=0.5, pooling="max"):
+    def __init__(
+        self, input_dim, embedding_dim, hidden_dim=64, dropout=0.5, pooling="max"
+    ):
         """
         input_dim: размер входных признаков узлов
         hidden_dim: размер скрытого пространства в графовых свёрточных слоях
@@ -87,9 +90,11 @@ class GCN(nn.Module):
         self.gc4 = GCNConv(512, self.hidden_dim)
 
         self.residual_proj = (
-            nn.Linear(input_dim, self.hidden_dim) if input_dim != self.hidden_dim else nn.Identity()
+            nn.Linear(input_dim, self.hidden_dim)
+            if input_dim != self.hidden_dim
+            else nn.Identity()
         )
-        
+
         self.layer_norm = nn.LayerNorm(self.hidden_dim)
         self.dropout = nn.Dropout(dropout)
         self.pooling = pooling
@@ -232,7 +237,11 @@ class CustomDataset(Dataset):
     def __init__(self, graphs, accuracies=None, use_tqdm=False):
         self.indexes = []
         self.adjs, self.features = [], []
-        self.accuracies = torch.tensor(accuracies, dtype=torch.float) if accuracies is not None else None
+        self.accuracies = (
+            torch.tensor(accuracies, dtype=torch.float)
+            if accuracies is not None
+            else None
+        )
 
         iterator = tqdm(graphs) if use_tqdm else graphs
 
@@ -259,6 +268,7 @@ class CustomDataset(Dataset):
     def __len__(self):
         return len(self.indexes)
 
+
 class TripletGraphDataset(Dataset):
     def __init__(self, base_dataset, diversity_matrix):
         """
@@ -271,10 +281,7 @@ class TripletGraphDataset(Dataset):
 
         # Строим отображение оригинального индекса -> внутренний
         # пример: если base_dataset[5].index == 42, то orig2int[42] = 5
-        self.orig2int = {
-            self.base[i].index: i
-            for i in range(self.N)
-        }
+        self.orig2int = {self.base[i].index: i for i in range(self.N)}
 
     def __len__(self):
         return self.N
@@ -314,6 +321,7 @@ class TripletGraphDataset(Dataset):
         idx_triplet = torch.tensor([anchor_orig, pos_o, neg_o], dtype=torch.long)
         return anchor, positive, negative, idx_triplet
 
+
 def collate_triplets(batch):
     """
     batch: list of tuples (anchor, pos, neg, idx_triplet)
@@ -340,14 +348,15 @@ def collate_graphs(batch):
 
 def train_model_diversity(
     model,
-    train_loader,         # DataLoader выдаёт (anchor_batch, pos_batch, neg_batch)
-    valid_loader,         # То же для валидации
+    train_loader,  # DataLoader выдаёт (anchor_batch, pos_batch, neg_batch)
+    valid_loader,  # То же для валидации
     optimizer,
     criterion,
     num_epochs,
     device="cpu",
     developer_mode=False,
-    final_lr=0.001
+    final_lr=0.001,
+    draw_figure=False,
 ):
     model.to(device)
     train_losses, valid_losses = [], []
@@ -361,20 +370,24 @@ def train_model_diversity(
         running_loss = 0.0
         n_batches = 0
 
-        for i, (anchor_batch, pos_batch, neg_batch, idx_triplet) in enumerate(train_loader):
+        for i, (anchor_batch, pos_batch, neg_batch, idx_triplet) in enumerate(
+            train_loader
+        ):
             if developer_mode and i > 0:
                 break
 
             optimizer.zero_grad()
             # Переносим весь батч на device
             anchor_batch = anchor_batch.to(device)
-            pos_batch    = pos_batch.to(device)
-            neg_batch    = neg_batch.to(device)
+            pos_batch = pos_batch.to(device)
+            neg_batch = neg_batch.to(device)
 
             # Прогоняем через модель
-            emb_anchor = model(anchor_batch.x, anchor_batch.edge_index, anchor_batch.batch)
-            emb_pos    = model(pos_batch.x,    pos_batch.edge_index,    pos_batch.batch)
-            emb_neg    = model(neg_batch.x,    neg_batch.edge_index,    neg_batch.batch)
+            emb_anchor = model(
+                anchor_batch.x, anchor_batch.edge_index, anchor_batch.batch
+            )
+            emb_pos = model(pos_batch.x, pos_batch.edge_index, pos_batch.batch)
+            emb_neg = model(neg_batch.x, neg_batch.edge_index, neg_batch.batch)
 
             # Считаем loss, backward, step
             loss = criterion(emb_anchor, emb_pos, emb_neg)
@@ -396,18 +409,22 @@ def train_model_diversity(
         n_val_batches = 0
 
         with torch.no_grad():
-            for i, (anchor_batch, pos_batch, neg_batch, idx_triplet) in enumerate(valid_loader):
+            for i, (anchor_batch, pos_batch, neg_batch, idx_triplet) in enumerate(
+                valid_loader
+            ):
                 if developer_mode and i > 0:
                     break
 
                 # перенос на device
                 anchor_batch = anchor_batch.to(device)
-                pos_batch    = pos_batch.to(device)
-                neg_batch    = neg_batch.to(device)
+                pos_batch = pos_batch.to(device)
+                neg_batch = neg_batch.to(device)
 
-                emb_anchor = model(anchor_batch.x, anchor_batch.edge_index, anchor_batch.batch)
-                emb_pos    = model(pos_batch.x,    pos_batch.edge_index,    pos_batch.batch)
-                emb_neg    = model(neg_batch.x,    neg_batch.edge_index,    neg_batch.batch)
+                emb_anchor = model(
+                    anchor_batch.x, anchor_batch.edge_index, anchor_batch.batch
+                )
+                emb_pos = model(pos_batch.x, pos_batch.edge_index, pos_batch.batch)
+                emb_neg = model(neg_batch.x, neg_batch.edge_index, neg_batch.batch)
 
                 loss = criterion(emb_anchor, emb_pos, emb_neg)
                 val_loss += loss.item()
@@ -421,26 +438,41 @@ def train_model_diversity(
         # --------------------
         try:
             from IPython.display import clear_output
+
             clear_output(wait=True)
         except ImportError:
             pass
 
+        lr = scheduler.get_last_lr()[0]
+        print(
+            f"Epoch {epoch+1}/{num_epochs} — "
+            f"Train Loss: {avg_train_loss:.4f}, Valid Loss: {avg_valid_loss:.4f}, LR: {lr:.6f}"
+        )
+
+    if draw_figure:
         plt.figure(figsize=(12, 6))
-        plt.rc('font', size=20)
-        plt.plot(range(1, len(train_losses)+1), train_losses, marker='o', label='Train Loss')
-        plt.plot(range(1, len(valid_losses)+1), valid_losses, marker='s', label='Valid Loss')
-        plt.xlabel('Epoch')
-        plt.ylabel('Loss')
+        plt.rc("font", size=20)
+        plt.plot(
+            range(1, len(train_losses) + 1),
+            train_losses,
+            marker="o",
+            label="Train Loss",
+        )
+        plt.plot(
+            range(1, len(valid_losses) + 1),
+            valid_losses,
+            marker="s",
+            label="Valid Loss",
+        )
+        plt.xlabel("Epoch")
+        plt.ylabel("Loss")
         plt.grid(True)
         plt.legend()
         plt.tight_layout()
         plt.show()
 
-        lr = scheduler.get_last_lr()[0]
-        print(f"Epoch {epoch+1}/{num_epochs} — "
-              f"Train Loss: {avg_train_loss:.4f}, Valid Loss: {avg_valid_loss:.4f}, LR: {lr:.6f}")
-
     return train_losses, valid_losses
+
 
 def train_model_accuracy(
     model,
@@ -452,6 +484,7 @@ def train_model_accuracy(
     device="cpu",
     developer_mode=False,
     final_lr=0.001,
+    draw_figure=False,
 ):
     model.to(device)
     train_losses = []
@@ -509,16 +542,33 @@ def train_model_accuracy(
 
         try:
             from IPython.display import clear_output
+
             clear_output(wait=True)
         except:
             pass
 
+        lr = scheduler.get_last_lr()[0]
+        print(
+            f"Epoch {epoch+1}, Train Loss: {avg_train_loss * 1e4:.4f}, "
+            f"Valid Loss: {avg_valid_loss * 1e4:.4f}, LR: {lr:.6f}"
+        )
+    if draw_figure:
         plt.figure(figsize=(12, 6))
-        plt.rc('font', size=20)
+        plt.rc("font", size=20)
         tmp_train_losses = np.array(train_losses)
         tmp_valid_losses = np.array(valid_losses)
-        plt.plot(range(1, len(tmp_train_losses) + 1), tmp_train_losses * 1e4, marker="o", label="Train Loss")
-        plt.plot(range(1, len(tmp_valid_losses) + 1), tmp_valid_losses * 1e4, marker="o", label="Valid Loss")
+        plt.plot(
+            range(1, len(tmp_train_losses) + 1),
+            tmp_train_losses * 1e4,
+            marker="o",
+            label="Train Loss",
+        )
+        plt.plot(
+            range(1, len(tmp_valid_losses) + 1),
+            tmp_valid_losses * 1e4,
+            marker="o",
+            label="Valid Loss",
+        )
         plt.xlabel("Epoch")
         plt.ylabel("Loss * 1e4")
         plt.ylim(0, 10)
@@ -526,11 +576,8 @@ def train_model_accuracy(
         plt.legend()
         plt.show()
 
-        lr = scheduler.get_last_lr()[0]
-        print(f"Epoch {epoch+1}, Train Loss: {avg_train_loss * 1e4:.4f}, "
-              f"Valid Loss: {avg_valid_loss * 1e4:.4f}, LR: {lr:.6f}")
-
     return train_losses, valid_losses
+
 
 def get_positive_and_negative(diversity_matrix, indices, dataset=None):
     positive_indices = []
@@ -538,7 +585,8 @@ def get_positive_and_negative(diversity_matrix, indices, dataset=None):
 
     for index in indices:
         positive = np.where(
-            (diversity_matrix[index, :] == 1) & (np.arange(len(diversity_matrix)) != index)
+            (diversity_matrix[index, :] == 1)
+            & (np.arange(len(diversity_matrix)) != index)
         )[0].tolist()
         negative = np.where(diversity_matrix[index, :] == -1)[0].tolist()
 
@@ -566,6 +614,7 @@ def get_positive_and_negative(diversity_matrix, indices, dataset=None):
             negative_indices.append(np.random.choice(negative))
 
     return positive_indices, negative_indices
+
 
 def extract_embeddings(model, data_loader, device, use_tqdm=True):
     model.to(device)
