@@ -1,0 +1,28 @@
+{
+    "dataset_path": "third_dataset/",
+    "device": "cpu",
+    "developer_mode": false,
+    "n_models": 1300,
+
+    "upper_margin": 0.8,
+    "lower_margin": 0.2,
+
+    "train_size": 0.8,
+    "batch_size": 8,
+
+    "acc_num_epochs": 20,
+    "acc_lr": 1e-2,
+    "acc_final_lr": 1e-4,
+    "acc_dropout": 0.2,
+    "acc_n_heads": 16,
+    "draw_fig_acc": true,
+
+    "div_num_epochs": 10,
+    "div_lr": 1e-3,
+    "div_final_lr": 1e-5,
+    "div_dropout": 0.1,
+    "div_n_heads": 4,
+    "margin": 1,
+    "output_dim": 128,
+    "draw_fig_div": false
+}
