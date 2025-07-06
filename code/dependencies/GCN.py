@@ -19,6 +19,7 @@ from torch.utils.data import Dataset
 from joblib import Parallel, delayed
 from torch_geometric.data import Data, Batch
 from torch_geometric.loader import DataLoader
+from torch_geometric.utils import dropout_edge
 
 
 class SimpleGCN(nn.Module):
@@ -146,22 +147,20 @@ class GAT(nn.Module):
 
         self.input_dim = input_dim
         self.output_dim = output_dim
-        self.hidden_dim = 64  # базовая размерность скрытого слоя
+        self.hidden_dim = 64
         self.heads = heads
 
-        # Attention Conv слои
         self.gat1 = GATv2Conv(input_dim, self.hidden_dim // heads, heads=heads)
         self.gat2 = GATv2Conv(self.hidden_dim, 256 // heads, heads=heads)
         self.gat3 = GATv2Conv(256, 256 // heads, heads=heads)
         self.gat4 = GATv2Conv(256, self.hidden_dim // heads, heads=heads)
 
-        # Проекции для full residual
+        # residual projection
         self.res1 = nn.Linear(input_dim, self.hidden_dim)
         self.res2 = nn.Linear(self.hidden_dim, 256)
         self.res3 = nn.Linear(256, 256)
         self.res4 = nn.Linear(256, self.hidden_dim)
 
-        # Нормализация после каждого блока
         self.norm1 = GraphNorm(self.hidden_dim)
         self.norm2 = GraphNorm(256)
         self.norm3 = GraphNorm(256)
@@ -170,7 +169,6 @@ class GAT(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.pooling = pooling
 
-        # Полносвязная часть для графового эмбеддинга
         self.fc1 = nn.Linear(self.hidden_dim, self.hidden_dim)
         self.fc_norm = nn.LayerNorm(self.hidden_dim)
         self.fc2 = nn.Linear(self.hidden_dim, output_dim)
@@ -200,7 +198,7 @@ class GAT(nn.Module):
         h4 = self.norm4(h4)
         h4 = self.dropout(h4)
 
-        # Глобальное агрегирование
+        # Global pooling
         if self.pooling == "max":
             hg = global_max_pool(h4, batch)
         elif self.pooling == "mean":
@@ -210,7 +208,7 @@ class GAT(nn.Module):
         else:
             raise ValueError("Unsupported pooling method. Use 'max', 'mean' or 'sum'.")
 
-        # Финальный MLP
+        # Final MLP
         out = self.fc1(hg)
         out = self.fc_norm(out)
         out = F.leaky_relu(out)
@@ -223,7 +221,7 @@ class GAT(nn.Module):
 class CustomDataset(Dataset):
     @staticmethod
     def preprocess(adj, features):
-        """Преобразует матрицу смежности и признаки в тензоры."""
+        """Transforms the adjacency matrix and features into tensors."""
         adj = torch.tensor(adj, dtype=torch.float)
         features = torch.tensor(features, dtype=torch.float)
         return adj, features
@@ -272,68 +270,68 @@ class CustomDataset(Dataset):
 class TripletGraphDataset(Dataset):
     def __init__(self, base_dataset, diversity_matrix):
         """
-        base_dataset: CustomDataset, отдающий Data с .index
-        diversity_matrix: матрица [M, M], M >= N, значений {1, -1, 0}
+        base_dataset: CustomDataset that transmits data from .index
+        diversity_matrix: matrix [M, M], M >= N, value {1, -1, 0}
         """
         self.base = base_dataset
         self.div = diversity_matrix
         self.N = len(self.base)
 
-        # Строим отображение оригинального индекса -> внутренний
-        # пример: если base_dataset[5].index == 42, то orig2int[42] = 5
+        # Building a display of the original index -> internal
+        # example: if base_dataset[5].index == 42, then orig2int[42] = 5
         self.orig2int = {self.base[i].index: i for i in range(self.N)}
 
     def __len__(self):
         return self.N
 
     def __getitem__(self, idx):
-        # 1) Получаем Data и его оригинальный индекс
+        # 1) Get Data and its original index
         anchor = self.base[idx]
-        anchor_orig = anchor.index  # в диапазоне [0, M-1]
+        anchor_orig = anchor.index  # in range [0, M-1]
 
-        # 2) Берём строку diversity_matrix по оригинальному индексу
-        row = self.div[anchor_orig]  # длина M
+        # 2) Get the row of diversity_matrix by the original index
+        row = self.div[anchor_orig]  # length M
 
-        # 3) Находим оригинальные индексы положительных и отрицательных
+        # 3) Find original indices of positive and negative examples
         pos_orig = np.where((row == 1) & (np.arange(len(row)) != anchor_orig))[0]
         neg_orig = np.where(row == -1)[0]
 
-        # 4) Фильтруем по наличию в self.orig2int
+        # 4) Filter by presence in self.orig2int
         pos_orig = [i for i in pos_orig if i in self.orig2int]
         neg_orig = [i for i in neg_orig if i in self.orig2int]
 
-        # 5) Проверка наличия хотя бы одного положительного и отрицательного
+        # 5) Check for at least one positive and negative example
         if len(pos_orig) == 0 or len(neg_orig) == 0:
             raise IndexError(f"No valid pos/neg for original index {anchor_orig}")
 
-        # 6) Случайно выбираем подходящие индексы
+        # 6) Randomly select appropriate indices
         pos_o = int(np.random.choice(pos_orig))
         neg_o = int(np.random.choice(neg_orig))
 
-        # 7) Переводим в внутренние индексы и получаем Data
+        # 7) Convert to internal indices and get Data
         pos_int = self.orig2int[pos_o]
         neg_int = self.orig2int[neg_o]
 
         positive = self.base[pos_int]
         negative = self.base[neg_int]
 
-        # 8) Возвращаем три Data и тензор оригинальных индексов
+        # 8) Return three Data and a tensor of original indices
         idx_triplet = torch.tensor([anchor_orig, pos_o, neg_o], dtype=torch.long)
         return anchor, positive, negative, idx_triplet
 
 
 def collate_triplets(batch):
     """
-    batch: list of tuples (anchor, pos, neg, idx_triplet)
-    Возвращаем:
-      - три Batched Data
-      - один LongTensor [batch_size, 3] с исходными индексами
+    batch: list of types (anchor, pos, neg, idx_triplet)
+    is returned:
+        - Three Batched Data
+        - one LongTensor [batch_size, 3] with the original indexes
     """
     anchors, positives, negatives, idxs = zip(*batch)
     batch_anchor = Batch.from_data_list(anchors)
     batch_positive = Batch.from_data_list(positives)
     batch_negative = Batch.from_data_list(negatives)
-    # соберём матрицу индексов shape=(batch_size,3)
+    # assemble the matrix of indexes shape=(batch_size,3)
     idx_tensor = torch.cat(idxs, dim=0).view(-1, 3)
     return batch_anchor, batch_positive, batch_negative, idx_tensor
 
@@ -341,15 +339,15 @@ def collate_triplets(batch):
 def collate_graphs(batch):
     """
     batch: list of torch_geometric.data.Data
-    Возвращает Batch, который можно подать в GNN.
+    Returns Batch, which can be passed to GNN.
     """
     return Batch.from_data_list(batch)
 
 
 def train_model_diversity(
     model,
-    train_loader,  # DataLoader выдаёт (anchor_batch, pos_batch, neg_batch)
-    valid_loader,  # То же для валидации
+    train_loader,  # DataLoader returns (anchor_batch, pos_batch, neg_batch, idx_triplet)
+    valid_loader,  # The same for validation
     optimizer,
     criterion,
     num_epochs,
@@ -364,7 +362,7 @@ def train_model_diversity(
 
     for epoch in tqdm(range(num_epochs), desc="Training Progress"):
         # --------------------
-        # 1) Тренировочный проход
+        # 1) Training pass
         # --------------------
         model.train()
         running_loss = 0.0
@@ -377,19 +375,19 @@ def train_model_diversity(
                 break
 
             optimizer.zero_grad()
-            # Переносим весь батч на device
+            # Move the entire batch to device
             anchor_batch = anchor_batch.to(device)
             pos_batch = pos_batch.to(device)
             neg_batch = neg_batch.to(device)
 
-            # Прогоняем через модель
+            # Feed through the model
             emb_anchor = model(
                 anchor_batch.x, anchor_batch.edge_index, anchor_batch.batch
             )
             emb_pos = model(pos_batch.x, pos_batch.edge_index, pos_batch.batch)
             emb_neg = model(neg_batch.x, neg_batch.edge_index, neg_batch.batch)
 
-            # Считаем loss, backward, step
+            # Calculate loss, backward, step
             loss = criterion(emb_anchor, emb_pos, emb_neg)
             loss.backward()
             optimizer.step()
@@ -402,7 +400,7 @@ def train_model_diversity(
         train_losses.append(avg_train_loss)
 
         # --------------------
-        # 2) Валидация
+        # 2) Validation
         # --------------------
         model.eval()
         val_loss = 0.0
@@ -415,7 +413,7 @@ def train_model_diversity(
                 if developer_mode and i > 0:
                     break
 
-                # перенос на device
+                # Move the entire batch to device
                 anchor_batch = anchor_batch.to(device)
                 pos_batch = pos_batch.to(device)
                 neg_batch = neg_batch.to(device)
@@ -433,16 +431,6 @@ def train_model_diversity(
         avg_valid_loss = val_loss / max(1, n_val_batches)
         valid_losses.append(avg_valid_loss)
 
-        # --------------------
-        # 3) Лог и визуализация
-        # --------------------
-        try:
-            from IPython.display import clear_output
-
-            clear_output(wait=True)
-        except ImportError:
-            pass
-
         lr = scheduler.get_last_lr()[0]
         print(
             f"Epoch {epoch+1}/{num_epochs} — "
@@ -450,26 +438,7 @@ def train_model_diversity(
         )
 
     if draw_figure:
-        plt.figure(figsize=(12, 6))
-        plt.rc("font", size=20)
-        plt.plot(
-            range(1, len(train_losses) + 1),
-            train_losses,
-            marker="o",
-            label="Train Loss",
-        )
-        plt.plot(
-            range(1, len(valid_losses) + 1),
-            valid_losses,
-            marker="s",
-            label="Valid Loss",
-        )
-        plt.xlabel("Epoch")
-        plt.ylabel("Loss")
-        plt.grid(True)
-        plt.legend()
-        plt.tight_layout()
-        plt.show()
+        plot_train_valid_losses(train_losses, valid_losses)
 
     return train_losses, valid_losses
 
@@ -495,7 +464,7 @@ def train_model_accuracy(
     for epoch in tqdm(range(num_epochs), desc="Training Progress"):
         model.train()
         train_loss = 0
-        n_train_samples = 0  # изменено: считаем количество графов, а не батчей
+        n_train_samples = 0
 
         for i, data in enumerate(train_loader):
             if developer_mode and i > 0:
@@ -540,43 +509,35 @@ def train_model_accuracy(
         avg_valid_loss = valid_loss / max(1, n_val_samples)
         valid_losses.append(avg_valid_loss)
 
-        try:
-            from IPython.display import clear_output
-
-            clear_output(wait=True)
-        except:
-            pass
-
         lr = scheduler.get_last_lr()[0]
         print(
             f"Epoch {epoch+1}, Train Loss: {avg_train_loss * 1e4:.4f}, "
             f"Valid Loss: {avg_valid_loss * 1e4:.4f}, LR: {lr:.6f}"
         )
+
     if draw_figure:
-        plt.figure(figsize=(12, 6))
-        plt.rc("font", size=20)
         tmp_train_losses = np.array(train_losses)
-        tmp_valid_losses = np.array(valid_losses)
-        plt.plot(
-            range(1, len(tmp_train_losses) + 1),
-            tmp_train_losses * 1e4,
-            marker="o",
-            label="Train Loss",
-        )
-        plt.plot(
-            range(1, len(tmp_valid_losses) + 1),
-            tmp_valid_losses * 1e4,
-            marker="o",
-            label="Valid Loss",
-        )
-        plt.xlabel("Epoch")
-        plt.ylabel("Loss * 1e4")
-        plt.ylim(0, 10)
-        plt.grid(True)
-        plt.legend()
-        plt.show()
+        tmp_valid_losses = np.array(valid_losses) * 1e4
+        plot_train_valid_losses(tmp_train_losses, tmp_valid_losses)
 
     return train_losses, valid_losses
+
+
+def plot_train_valid_losses(train_losses, valid_losses):
+    plt.figure(figsize=(12, 6))
+    plt.rc("font", size=20)
+    plt.plot(
+        range(1, len(train_losses) + 1), train_losses, marker="o", label="Train Loss"
+    )
+    plt.plot(
+        range(1, len(valid_losses) + 1), valid_losses, marker="s", label="Valid Loss"
+    )
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.grid(True)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
 
 
 def get_positive_and_negative(diversity_matrix, indices, dataset=None):

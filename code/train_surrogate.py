@@ -2,7 +2,6 @@ import json
 import logging
 import random
 from pathlib import Path
-from dataclasses import dataclass, field
 from typing import Optional
 
 import numpy as np
@@ -63,7 +62,7 @@ class SurrogateTrainer:
 
     def _prepare_predictions(self, num_samples: Optional[int] = None):
         preds = []
-        for data in self.config.models_dict[: self.config.n_models]:
+        for data in self.config.models_dict:
             arr = np.array(data["test_predictions"])
             preds.append(arr[:num_samples] if num_samples else arr)
         return preds

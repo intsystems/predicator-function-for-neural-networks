@@ -17,7 +17,6 @@ DARTS_OPS = [
     ]
 
 encoder = OneHotEncoder(handle_unknown='ignore')
-encoder = OneHotEncoder(handle_unknown='ignore')
 ops_array = np.array(DARTS_OPS).reshape(-1, 1)
 
 DARTS_OPS_ONE_HOT = encoder.fit_transform(ops_array).toarray()
