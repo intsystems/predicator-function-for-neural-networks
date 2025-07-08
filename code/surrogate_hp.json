@@ -1,8 +1,9 @@
 {
     "seed":42,
+    "num_workers": 4,
     "dataset_path": "third_dataset/",
     "device": "cpu",
-    "developer_mode": false,
+    "developer_mode": true,
     "n_models": 1300,
 
     "upper_margin": 0.75,
@@ -13,14 +14,14 @@
     "batch_size": 8,
     "input_dim":8,
 
-    "acc_num_epochs": 40,
+    "acc_num_epochs": 10,
     "acc_lr": 1e-2,
     "acc_final_lr": 1e-5,
     "acc_dropout": 0.2,
     "acc_n_heads": 16,
     "draw_fig_acc": false,
 
-    "div_num_epochs": 25,
+    "div_num_epochs": 5,
     "div_lr": 1e-3,
     "div_final_lr": 1e-6,
     "div_dropout": 0.1,
@@ -31,11 +32,21 @@
 
     "surrogate_inference_path": "surrogate_models/",
 
-    "n_ensemble_models": 5,
+    "n_ensemble_models": 2,
     "n_models_in_pool": 128,
-    "n_models_to_generate": 5000,
-    "batch_size_inference": 8192,
-    "min_accuracy_for_pool": 0.83,
-    "plot_tsne": true,
-    "best_models_save_path": "best_models/"
+    "n_models_to_generate": 4096,
+    "batch_size_inference": 4096,
+    "min_accuracy_for_pool": 0.85,
+    "plot_tsne": false,
+    "best_models_save_path": "best_models/",
+
+    "n_epochs_final": 1,
+    "lr_final": 0.025,
+    "batch_size_final": 96,
+    "dataset_name": "CIFAR10",
+    "final_dataset_path": "final_dataset/",
+    "output_path": "output/",
+    "width": 4,
+    "num_cells": 3,
+    "n_ece_bins": 15
 }

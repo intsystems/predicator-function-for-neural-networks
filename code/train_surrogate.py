@@ -12,7 +12,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import random_split, DataLoader
 from scipy.spatial import distance
-
+import shutil
 
 # Custom imports
 import sys
@@ -118,28 +118,28 @@ class SurrogateTrainer:
             cfg.train_dataset,
             batch_size=cfg.batch_size,
             shuffle=True,
-            num_workers=4,
+            num_workers=self.config.num_workers,
             collate_fn=collate_triplets,
         )
         cfg.valid_loader_diversity = DataLoader(
             cfg.valid_dataset,
             batch_size=cfg.batch_size,
             shuffle=False,
-            num_workers=4,
+            num_workers=self.config.num_workers,
             collate_fn=collate_triplets,
         )
         cfg.train_loader_accuracy = DataLoader(
             cfg.base_train_dataset,
             batch_size=cfg.batch_size,
             shuffle=True,
-            num_workers=4,
+            num_workers=self.config.num_workers,
             collate_fn=collate_graphs,
         )
         cfg.valid_loader_accuracy = DataLoader(
             cfg.base_valid_dataset,
             batch_size=cfg.batch_size,
             shuffle=False,
-            num_workers=4,
+            num_workers=self.config.num_workers,
             collate_fn=collate_graphs,
         )
 
@@ -198,6 +198,7 @@ class SurrogateTrainer:
 
     def save_models(self) -> None:
         path = Path(self.config.surrogate_inference_path)
+        shutil.rmtree(path, ignore_errors=True)
         path.mkdir(parents=True, exist_ok=True)
         torch.save(
             self.config.model_accuracy.state_dict(),

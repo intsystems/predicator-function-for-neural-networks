@@ -42,6 +42,17 @@ class TrainConfig:
 
     best_models_save_path: str
 
+    n_epochs_final: int
+    lr_final: float
+    batch_size_final: int
+    dataset_name: str
+    final_dataset_path: str
+    output_path: str
+    width: int
+    num_cells: int
+    num_workers: int
+    n_ece_bins: int
+
     seed: Optional[int] = None
 
     # Internal fields

@@ -19,6 +19,7 @@ import torch
 import gc
 from torch.utils.data import DataLoader
 from collections import deque
+import shutil
 
 # Custom imports
 import sys
@@ -98,7 +99,7 @@ class InferSurrogate:
                 dataset,
                 batch_size=self.config.batch_size_inference,
                 shuffle=False,
-                num_workers=4,
+                num_workers=self.config.num_workers,
                 collate_fn=collate_graphs,
             )
 
@@ -259,6 +260,7 @@ class InferSurrogate:
             plt.show()
 
     def save_models(self):
+        shutil.rmtree(self.config.best_models_save_path, ignore_errors=True)
         os.makedirs(self.config.best_models_save_path, exist_ok=True)
 
         # Сохраняем архитектуры по одной
