@@ -7,6 +7,10 @@ code/data
 code/dataset
 code/lightning_logs
 
+code/final_dataset/
+*.gz
+*.pth
+
 # C extensions
 *.so
 
@@ -130,3 +134,4 @@ logs/
 */mnist
 *.csv
 !.dvc
+
