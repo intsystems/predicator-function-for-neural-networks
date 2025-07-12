@@ -42,6 +42,9 @@ class TrainConfig:
 
     best_models_save_path: str
 
+    prepared_dataset_path: str
+    evaluate_ensemble_flag: bool
+
     n_epochs_final: int
     lr_final: float
     batch_size_final: int
