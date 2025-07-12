@@ -9,12 +9,13 @@ class DartsClassificationModule(ClassificationModule):
         learning_rate: float = 0.001,
         weight_decay: float = 0.,
         auxiliary_loss_weight: float = 0.4,
-        max_epochs: int = 600
+        max_epochs: int = 600,
+        num_classes: int = 10
     ):
         self.auxiliary_loss_weight = auxiliary_loss_weight
         # Training length will be used in LR scheduler
         self.max_epochs = max_epochs
-        super().__init__(learning_rate=learning_rate, weight_decay=weight_decay, export_onnx=False, num_classes=10)
+        super().__init__(learning_rate=learning_rate, weight_decay=weight_decay, export_onnx=False, num_classes=num_classes)
         
     def configure_optimizers(self):
         """Customized optimizer with momentum, as well as a scheduler."""

@@ -101,10 +101,13 @@ class DiversityNESRunner:
 
         if self.config.dataset_name.lower() == "cifar10":
             dataset_cls = CIFAR10
+            self.num_classes = 10
         elif self.config.dataset_name.lower() == "cifar100":
             dataset_cls = CIFAR100
+            self.num_classes = 100
         elif self.config.dataset_name.lower() == "fashionmnist":
             dataset_cls = FashionMNIST
+            self.num_classes = 10
 
         train_data = nni.trace(dataset_cls)(
             root=self.config.final_dataset_path,
@@ -158,11 +161,20 @@ class DiversityNESRunner:
         Train a single model defined by architecture and return the trained model.
         """
         try:
+            if self.config.dataset_name.lower() == "cifar10":
+                dataset = "cifar"
+            elif self.config.dataset_name.lower() == "cifar100":
+                dataset = "cifar100"
+            elif self.config.dataset_name.lower() == "fashionmnist":
+                dataset = "cifar"
+            else:
+                raise ValueError(f"Unknown dataset: {self.config.dataset_name}")
+
             with model_context(architecture):
                 model = DartsSpace(
                     width=self.config.width,
                     num_cells=self.config.num_cells,
-                    dataset="cifar",
+                    dataset=dataset,
                 )
 
             model.to(self.device)
@@ -176,6 +188,7 @@ class DiversityNESRunner:
                     weight_decay=3e-4,
                     auxiliary_loss_weight=0.4,
                     max_epochs=self.config.n_epochs_final,
+                    num_classes=self.num_classes,
                 ),
                 trainer=Trainer(
                     gradient_clip_val=5.0,
@@ -289,7 +302,7 @@ class DiversityNESRunner:
                 avg_output /= len(valid_models)
                 ensemble_probs = avg_output.softmax(dim=1)
                 confidences, preds_ens = ensemble_probs.max(1)
-                correct_ens_batch = (preds_ens == labels)
+                correct_ens_batch = preds_ens == labels
                 correct_ensemble += correct_ens_batch.sum().item()
 
                 confidences = confidences.cpu().float()
