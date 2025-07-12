@@ -6,6 +6,7 @@ __pycache__/
 code/data
 code/dataset
 code/lightning_logs
+code/datasets
 
 code/final_dataset/
 *.gz

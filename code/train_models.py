@@ -19,6 +19,7 @@ from tqdm import tqdm
 from DartsSpace import DARTS_with_CIFAR100 as DartsSpace
 from dependencies.darts_classification_module import DartsClassificationModule
 from dependencies.train_config import TrainConfig
+from dependencies.data_generator import generate_arch_dicts
 
 
 def load_json_from_directory(directory_path: str) -> List[dict]:
@@ -377,13 +378,15 @@ class DiversityNESRunner:
             )
 
         os.makedirs(self.config.output_path, exist_ok=True)
-
-        print("Loading architecture definitions...")
-        arch_dicts = load_json_from_directory(self.config.best_models_save_path)
-        if not arch_dicts:
-            raise RuntimeError(
-                "No valid architectures found in the specified directory"
-            )
+        if self.config.evaluate_ensemble_flag:
+            print("Loading architecture definitions...")
+            arch_dicts = load_json_from_directory(self.config.best_models_save_path)
+            if not arch_dicts:
+                raise RuntimeError(
+                    "No valid architectures found in the specified directory"
+                )
+        else:
+            arch_dicts = generate_arch_dicts(self.config.n_models_to_evaluate)
 
         print("Creating data loaders...")
         train_loader, valid_loader, test_loader = self.get_data_loaders()

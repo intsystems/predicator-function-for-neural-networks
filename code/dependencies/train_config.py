@@ -50,6 +50,7 @@ class TrainConfig:
     batch_size_final: int
     dataset_name: str
     final_dataset_path: str
+    n_models_to_evaluate: int
     output_path: str
     width: int
     num_cells: int
