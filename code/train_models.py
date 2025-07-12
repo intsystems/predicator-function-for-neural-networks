@@ -8,7 +8,7 @@ from typing import List, Tuple
 import numpy as np
 import torch
 import nni
-from torch.utils.data import SubsetRandomSampler, SequentialSampler, Subset
+from torch.utils.data import Subset
 from torchvision import transforms
 from torchvision.datasets import CIFAR10, CIFAR100, FashionMNIST
 from nni.nas.evaluator.pytorch import DataLoader, Lightning, Trainer
@@ -16,7 +16,6 @@ from nni.nas.space import model_context
 from tqdm import tqdm
 
 from DartsSpace import DARTS_with_CIFAR100 as DartsSpace
-from dependencies.data_generator import generate_arch_dicts
 from dependencies.darts_classification_module import DartsClassificationModule
 from dependencies.train_config import TrainConfig
 
@@ -113,6 +112,12 @@ class DiversityNESRunner:
             download=True,
             transform=transform,
         )
+        test_data = nni.trace(dataset_cls)(
+            root=self.config.final_dataset_path,
+            train=False,
+            download=True,
+            transform=transform,
+        )
         num_samples = len(train_data)
         indices = list(range(num_samples))
         np.random.shuffle(indices)
@@ -133,7 +138,14 @@ class DiversityNESRunner:
             num_workers=self.config.num_workers,
             shuffle=False,
         )
-        return train_loader, valid_loader
+        test_loader = DataLoader(
+            test_data,
+            batch_size=bs,
+            num_workers=self.config.num_workers,
+            shuffle=False,
+        )
+
+        return train_loader, valid_loader, test_loader
 
     def train_model(
         self,
@@ -147,23 +159,11 @@ class DiversityNESRunner:
         """
         try:
             with model_context(architecture):
-                if self.config.dataset_name.lower() == "fashionmnist":
-                    model = DartsSpace(
-                        width=self.config.width,
-                        num_cells=self.config.num_cells,
-                        dataset="fashionmnist",
-                    )
-                else:
-                    dataset_type = (
-                        "cifar"
-                        if self.config.dataset_name.lower() == "cifar10"
-                        else "cifar100"
-                    )
-                    model = DartsSpace(
-                        width=self.config.width,
-                        num_cells=self.config.num_cells,
-                        dataset=dataset_type,
-                    )
+                model = DartsSpace(
+                    width=self.config.width,
+                    num_cells=self.config.num_cells,
+                    dataset="cifar",
+                )
 
             model.to(self.device)
 
@@ -191,6 +191,7 @@ class DiversityNESRunner:
             evaluator.fit(model)
             self.models.append(model)
             return model
+
         except Exception as e:
             print(f"Error training model {model_id}: {str(e)}")
             return None
@@ -215,7 +216,7 @@ class DiversityNESRunner:
 
         total, correct = 0, 0
         predictions = []
-        with torch.inference_mode():  # More efficient than no_grad
+        with torch.inference_mode():
             for imgs, labels in valid_loader:
                 imgs, labels = imgs.to(self.device), labels.to(self.device)
                 outputs = torch.softmax(model(imgs), dim=1)
@@ -236,31 +237,29 @@ class DiversityNESRunner:
             json.dump(result, f, indent=4)
         print(f"Saved results for model {model_id} to {file_path}")
 
-    def evaluate_ensemble(self, valid_loader):
+    def evaluate_ensemble(self, test_loader):
         """
         Evaluate ensemble of models: compute Top-1 accuracy and Expected Calibration Error (ECE),
         save and print results.
         """
-        if not hasattr(self, 'models') or not self.models:
+        if not hasattr(self, "models") or not self.models:
             print("No models available for ensemble evaluation.")
             return None, None, None
 
         main_device = "cuda:0" if torch.cuda.is_available() else "cpu"
-        # Filter out None models (failed training)
         valid_models = [m for m in self.models if m is not None]
-        
+
         if not valid_models:
             print("No valid models for ensemble evaluation.")
             return None, None, None
-            
-        # Move models to device and set to eval mode
+
         for i, model in enumerate(valid_models):
             valid_models[i] = model.to(main_device).eval()
-        
+
         total = 0
         correct_ensemble = 0
         correct_models = [0] * len(valid_models)
-        
+
         # For ECE calculation
         n_bins = self.config.n_ece_bins
         bin_boundaries = torch.linspace(0, 1, n_bins + 1)
@@ -268,39 +267,34 @@ class DiversityNESRunner:
         bin_acc_sums = torch.zeros(n_bins)
         bin_counts = torch.zeros(n_bins)
 
-        with torch.inference_mode():  # More efficient than no_grad
-            for images, labels in tqdm(valid_loader, desc="Evaluating ensemble"):
+        with torch.inference_mode():
+            for images, labels in tqdm(test_loader, desc="Evaluating ensemble"):
                 images, labels = images.to(main_device), labels.to(main_device)
                 batch_size = labels.size(0)
                 total += batch_size
-                
-                # Initialize average output
+
                 avg_output = None
-                
+
                 for idx, model in enumerate(valid_models):
                     output = model(images)
-                    
-                    # Calculate individual model accuracy
+
                     probs = output.softmax(dim=1)
                     _, preds = probs.max(1)
-                    correct_models[idx] += preds.eq(labels).sum().item()
-                    
-                    # Accumulate outputs for ensemble average
+                    correct_models[idx] += (preds == labels).sum().item()
+
                     if avg_output is None:
                         avg_output = torch.zeros_like(output)
                     avg_output += output
-                
-                # Compute ensemble predictions
+
                 avg_output /= len(valid_models)
                 ensemble_probs = avg_output.softmax(dim=1)
                 confidences, preds_ens = ensemble_probs.max(1)
-                correct_ens_batch = preds_ens.eq(labels)
+                correct_ens_batch = (preds_ens == labels)
                 correct_ensemble += correct_ens_batch.sum().item()
-                
-                # Update ECE bins
+
                 confidences = confidences.cpu().float()
                 correct_ens_batch = correct_ens_batch.cpu().float()
-                
+
                 for conf, correct in zip(confidences, correct_ens_batch):
                     bin_idx = torch.bucketize(conf, bin_boundaries, right=True) - 1
                     if bin_idx < 0:  # Handle case when confidence is exactly 0.0
@@ -312,7 +306,7 @@ class DiversityNESRunner:
         # Calculate metrics
         ensemble_acc = 100.0 * correct_ensemble / total
         model_accs = [100.0 * c / total for c in correct_models]
-        
+
         # Calculate ECE
         ece = 0.0
         for i in range(n_bins):
@@ -328,7 +322,7 @@ class DiversityNESRunner:
         print(f"Ensemble ECE: {ece:.4f}")
         for i, acc in enumerate(model_accs):
             print(f"Model {i+1} Top-1 Accuracy: {acc:.2f}%")
-        
+
         os.makedirs(self.config.output_path, exist_ok=True)
         out_file = os.path.join(self.config.output_path, "ensemble_results.txt")
         with open(out_file, "w") as f:
@@ -337,7 +331,7 @@ class DiversityNESRunner:
             f.write(f"Number of models: {len(valid_models)}\n")
             for i, acc in enumerate(model_accs):
                 f.write(f"Model {i+1} Accuracy: {acc:.2f}%\n")
-        
+
         print(f"Results saved to {out_file}")
         return ensemble_acc, model_accs, ece
 
@@ -360,7 +354,7 @@ class DiversityNESRunner:
             )
 
         print("Creating data loaders...")
-        train_loader, valid_loader = self.get_data_loaders()
+        train_loader, valid_loader, test_loader = self.get_data_loaders()
 
         print(f"Starting training for {len(arch_dicts)} models...")
         archs = [d["architecture"] for d in arch_dicts]
@@ -371,7 +365,7 @@ class DiversityNESRunner:
             self.evaluate_and_save(model, arch, idx, valid_loader)
 
         print("\nEvaluating ensemble...")
-        self.evaluate_ensemble(valid_loader)
+        self.evaluate_ensemble(test_loader)
 
         print("\nAll models processed successfully!")
 
