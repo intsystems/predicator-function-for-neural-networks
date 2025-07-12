@@ -5,7 +5,7 @@ import torch
 import nni
 from torch.utils.data import SubsetRandomSampler, SequentialSampler
 from torchvision import transforms
-from torchvision.datasets import CIFAR10, CIFAR100
+from torchvision.datasets import CIFAR10, CIFAR100, ImageNet, FashionMNIST
 from nni.nas.evaluator.pytorch import DataLoader, Classification
 
 from DartsSpace import DARTS_with_CIFAR100 as DartsSpace
@@ -29,14 +29,28 @@ LEARNING_RATE = 0.025
 BATCH_SIZE = 96
 NUM_MODLES = 2000
 
-DATASET = "CIFAR100"
+DATASET = "FASHIONMNIST"
 
 if DATASET == "CIFAR10":
     MEAN = [0.49139968, 0.48215827, 0.44653124]
     STD = [0.24703233, 0.24348505, 0.26158768]
+    NUM_CLASSES = 10
+    SIZE = 32
 elif DATASET == "CIFAR100":
     MEAN = [0.5071, 0.4867, 0.4408]
     STD = [0.2673, 0.2564, 0.2762]
+    NUM_CLASSES = 100
+    SIZE = 32
+elif DATASET == "IMAGENET":
+    MEAN = [0.485, 0.456, 0.406]
+    STD = [0.229, 0.224, 0.225]
+    NUM_CLASSES = 1000
+    SIZE = 14
+elif DATASET == "FASHIONMNIST":
+    MEAN = [0.2860]
+    STD = [0.3530]
+    NUM_CLASSES = 10
+    SIZE = 28
 
 SEED = 228
 # random.seed(SEED)
@@ -76,7 +90,7 @@ def get_data_loaders(batch_size=512):
     """
     transform = transforms.Compose(
         [
-            transforms.RandomCrop(32, padding=4),
+            transforms.RandomCrop(SIZE, padding=4),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             transforms.Normalize(MEAN, STD),
@@ -90,9 +104,17 @@ def get_data_loaders(batch_size=512):
         train_data = nni.trace(CIFAR100)(
             root="./data", train=True, download=True, transform=transform
         )
+    elif DATASET == 'IMAGENET':
+        train_data = nni.trace(ImageNet)(
+            root="./data", train=True, download=True, transform=transform
+        )
+    elif DATASET == 'FASHIONMNIST':
+        train_data = nni.trace(FashionMNIST)(
+            root="./data", train=True, download=True, transform=transform
+        )
     num_samples = len(train_data)
     indices = np.random.permutation(num_samples)
-    split = int(num_samples * 0.5)
+    split = int(num_samples * 0.8)
 
     search_train_loader = DataLoader(
         train_data,
@@ -124,7 +146,11 @@ def train_model(
             model = DartsSpace(width=16, num_cells=10, dataset='cifar')
         elif DATASET == 'CIFAR100':
             model = DartsSpace(width=16, num_cells=10, dataset='cifar100')
-    
+        elif DATASET == 'IMAGENET':
+            model = DartsSpace(width=16, num_cells=10, dataset='imagenet')
+        elif DATASET == 'FASHIONMNIST':
+            model = DartsSpace(width=16, num_cells=10, dataset='fashionmnist')
+
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     #if torch.cuda.device_count() > 1:
     #    model = torch.nn.DataParallel(model)
@@ -135,7 +161,8 @@ def train_model(
             learning_rate=learning_rate,
             weight_decay=3e-4,
             auxiliary_loss_weight=0.4,
-            max_epochs=max_epochs
+            max_epochs=max_epochs,
+            num_classes=(NUM_CLASSES)
         ),
         trainer=Trainer(
             gradient_clip_val=5.0,
@@ -228,5 +255,5 @@ if __name__ == "__main__":
         clear_output(wait=True)
         
         evaluate_and_save_results(
-            model, architecture, idx, valid_loader=search_valid_loader, folder_name="results_cifar100"
+            model, architecture, idx + 326, valid_loader=search_valid_loader, folder_name="results_fashion_0"
         )  # Оцениваем и сохраняем архитектуры, предсказания на тестовом наборе CIFAR10 и accuracy

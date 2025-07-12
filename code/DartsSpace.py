@@ -187,13 +187,16 @@ class FactorizedReduce(nn.Module):
 
 
 class AuxiliaryHead(nn.Module):
-    def __init__(self, C: int, num_labels: int, dataset: Literal['imagenet', 'cifar', 'cifar100']):
+    def __init__(self, C: int, num_labels: int, dataset: Literal['imagenet', 'cifar', 'cifar100', 'fashionmnist']):
         super().__init__()
         if dataset == 'imagenet':
             # assuming input size 14x14
             stride = 2
-        elif dataset == 'cifar' or dataset == 'cifar100':
+        elif dataset in ['cifar', 'cifar100']:
             stride = 3
+        elif dataset == 'fashionmnist':
+            # FashionMNIST is 28x28, similar to CIFAR but different resolution
+            stride = 2
 
         self.features = nn.Sequential(
             nn.ReLU(inplace=True),
@@ -446,7 +449,7 @@ class NDS_with_CIFAR100(ModelSpace):
                  num_nodes_per_cell: int = 4,
                  width: Union[Tuple[int, ...], int] = 16,
                  num_cells: Union[Tuple[int, ...], int] = 20,
-                 dataset: Literal['cifar', 'cifar100', 'imagenet'] = 'imagenet',
+                 dataset: Literal['cifar', 'cifar100', 'imagenet', 'fashionmnist'] = 'imagenet',
                  auxiliary_loss: bool = False,
                  drop_path_prob: float = 0.):
         super().__init__()
@@ -457,11 +460,13 @@ class NDS_with_CIFAR100(ModelSpace):
         self.width = width
         self.num_cells = num_cells
         self.dataset = dataset
-        # Обновленная логика для определения количества классов
+        # Updated logic for determining number of classes
         if dataset == 'cifar':
             self.num_labels = 10
         elif dataset == 'cifar100':
             self.num_labels = 100
+        elif dataset == 'fashionmnist':
+            self.num_labels = 10  # FashionMNIST has 10 classes
         else:  # imagenet
             self.num_labels = 1000
         self.auxiliary_loss = auxiliary_loss
@@ -497,6 +502,15 @@ class NDS_with_CIFAR100(ModelSpace):
         elif dataset in ['cifar', 'cifar100']:  # Объединенная обработка для CIFAR датасетов
             self.stem = nn.Sequential(
                 MutableConv2d(3, cast(int, 3 * C), 3, padding=1, bias=False),
+                MutableBatchNorm2d(cast(int, 3 * C))
+            )
+            C_pprev = C_prev = 3 * C
+            C_curr = C
+            last_cell_reduce = False
+        elif dataset == 'fashionmnist':  # FashionMNIST processing
+            # FashionMNIST is grayscale (1 channel) and 28x28
+            self.stem = nn.Sequential(
+                MutableConv2d(1, cast(int, 3 * C), 3, padding=1, bias=False),  # 1 input channel for grayscale
                 MutableBatchNorm2d(cast(int, 3 * C))
             )
             C_pprev = C_prev = 3 * C
