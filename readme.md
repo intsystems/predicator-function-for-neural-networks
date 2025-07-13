@@ -195,7 +195,7 @@ Using this function, we develop an efficient NES framework that enables the sele
 
 1. **Подготовка датасета:** 
 ```bash
-# Перед запуском необходимо скачать выставить флаг "evaluate_ensemble_flag": false и указать количество моделей 
+# Перед запуском необходимо выставить флаг "evaluate_ensemble_flag": false и указать количество моделей 
 # для оценки
 python train_models.py --hyperparameters_json surrogate_hp.json 
 ```
