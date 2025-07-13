@@ -193,7 +193,7 @@ Using this function, we develop an efficient NES framework that enables the sele
 
 ## Запуск системы
 
-1. **Подготовка датасет:** 
+1. **Подготовка датасета:** 
 ```bash
 # Перед запуском необходимо скачать выставить флаг "evaluate_ensemble_flag": false и указать количество моделей 
 # для оценки
