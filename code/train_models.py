@@ -1,5 +1,6 @@
 import os
 import json
+import shutil
 import argparse
 from pathlib import Path
 import random
@@ -15,9 +16,10 @@ from nni.nas.evaluator.pytorch import DataLoader, Lightning, Trainer
 from nni.nas.space import model_context
 from tqdm import tqdm
 
-from DartsSpace import DARTS_with_CIFAR100 as DartsSpace
+from utils_nni.DartsSpace import DARTS_with_CIFAR100 as DartsSpace
 from dependencies.darts_classification_module import DartsClassificationModule
 from dependencies.train_config import TrainConfig
+from dependencies.data_generator import generate_arch_dicts
 
 
 def load_json_from_directory(directory_path: str) -> List[dict]:
@@ -44,6 +46,7 @@ class DiversityNESRunner:
     def __init__(self, config: TrainConfig):
         self.config = config
         self.models = []
+        self.model_id = 0
         # Set random seeds for reproducibility
         if config.seed is not None:
             random.seed(config.seed)
@@ -209,46 +212,63 @@ class DiversityNESRunner:
             print(f"Error training model {model_id}: {str(e)}")
             return None
 
-    def evaluate_and_save(
+    def evaluate_and_save_results(
         self,
-        model: torch.nn.Module,
-        architecture: dict,
-        model_id: int,
-        valid_loader: DataLoader,
+        model,
+        architecture,
+        valid_loader,
+        folder_name="results_dataset",
     ):
         """
-        Evaluate the model's performance on validation data and save results.
+        Оценивает модель на валидационном наборе данных и сохраняет результаты в JSON.
+        Аргументы:
+        model: Обученная модель
+        architecture: Архитектура модели
+        valid_loader (DataLoader): DataLoader для валидационных данных
+        model_id: Уникальный идентификатор модели
+        folder_name (str): Папка для сохранения результатов
         """
-        if model is None:
-            print(f"Skipping evaluation for failed model {model_id}")
-            return
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        os.makedirs(folder_name, exist_ok=True)
 
-        out_folder = self.config.output_path
-        os.makedirs(out_folder, exist_ok=True)
-        model.to(self.device).eval()
+        # Перенос модели на устройство и режим оценки
+        model.to(device)
+        model.eval()
 
-        total, correct = 0, 0
-        predictions = []
-        with torch.inference_mode():
-            for imgs, labels in valid_loader:
-                imgs, labels = imgs.to(self.device), labels.to(self.device)
-                outputs = torch.softmax(model(imgs), dim=1)
-                predictions.extend(outputs.cpu().tolist())
-                _, preds = outputs.max(dim=1)
-                correct += (preds == labels).sum().item()
-                total += labels.size(0)
+        valid_correct = 0
+        valid_total = 0
+        valid_preds = []
 
-        acc = correct / total
+        with torch.no_grad():
+            for images, labels in valid_loader:
+                # print(labels)
+                images, labels = images.to(device), labels.to(device)
+                outputs = model(images)
+                outputs = torch.softmax(outputs, dim=1)
+                valid_preds.extend(outputs.cpu().tolist())
+                _, predicted = torch.max(outputs, 1)
+                valid_correct += (predicted == labels).sum().item()
+                valid_total += labels.size(0)
+
+        valid_accuracy = valid_correct / valid_total
+
+        # Формирование результата
         result = {
-            "model_id": model_id,
             "architecture": architecture,
-            "valid_accuracy": acc,
+            "valid_predictions": valid_preds,
+            "valid_accuracy": valid_accuracy,
         }
 
-        file_path = os.path.join(out_folder, f"model_{model_id:04d}_results.json")
+        # Генерация имени файла с использованием model_id
+        file_name = f"model_{self.model_id:04d}_results.json"
+        file_path = os.path.join(folder_name, file_name)
+
+        # Сохранение результатов
         with open(file_path, "w") as f:
             json.dump(result, f, indent=4)
-        print(f"Saved results for model {model_id} to {file_path}")
+
+        print(f"Results for model_{self.model_id} saved to {file_path}")
+        self.model_id += 1
 
     def evaluate_ensemble(self, test_loader):
         """
@@ -336,6 +356,7 @@ class DiversityNESRunner:
         for i, acc in enumerate(model_accs):
             print(f"Model {i+1} Top-1 Accuracy: {acc:.2f}%")
 
+        shutil.rmtree(self.config.output_path, ignore_errors=True)
         os.makedirs(self.config.output_path, exist_ok=True)
         out_file = os.path.join(self.config.output_path, "ensemble_results.txt")
         with open(out_file, "w") as f:
@@ -358,27 +379,34 @@ class DiversityNESRunner:
             )
 
         os.makedirs(self.config.output_path, exist_ok=True)
-
-        print("Loading architecture definitions...")
-        arch_dicts = load_json_from_directory(self.config.best_models_save_path)
-        if not arch_dicts:
-            raise RuntimeError(
-                "No valid architectures found in the specified directory"
-            )
+        if self.config.evaluate_ensemble_flag:
+            print("Loading architecture definitions...")
+            arch_dicts = load_json_from_directory(self.config.best_models_save_path)
+            if not arch_dicts:
+                raise RuntimeError(
+                    "No valid architectures found in the specified directory"
+                )
+        else:
+            arch_dicts = generate_arch_dicts(self.config.n_models_to_evaluate)
 
         print("Creating data loaders...")
         train_loader, valid_loader, test_loader = self.get_data_loaders()
 
         print(f"Starting training for {len(arch_dicts)} models...")
         archs = [d["architecture"] for d in arch_dicts]
+        
+        if not self.config.evaluate_ensemble_flag:
+            shutil.rmtree(self.config.prepared_dataset_path, ignore_errors=True)
 
         for idx, arch in enumerate(tqdm(archs, desc="Training models")):
             print(f"\nTraining model {idx+1}/{len(archs)}")
             model = self.train_model(arch, train_loader, valid_loader, idx)
-            self.evaluate_and_save(model, arch, idx, valid_loader)
+            if not self.config.evaluate_ensemble_flag:
+                self.evaluate_and_save_results(model, arch, valid_loader, self.config.prepared_dataset_path)
 
-        print("\nEvaluating ensemble...")
-        self.evaluate_ensemble(test_loader)
+        if self.config.evaluate_ensemble_flag:
+            print("\nEvaluating ensemble...")
+            self.evaluate_ensemble(test_loader)
 
         print("\nAll models processed successfully!")
 
