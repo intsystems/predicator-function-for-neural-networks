@@ -45,7 +45,7 @@
     "batch_size_final": 96,
     "dataset_name": "CIFAR10",
     "final_dataset_path": "datasets/final_dataset/",
-    "evaluate_ensemble_flag": false,
+    "evaluate_ensemble_flag": true,
     "n_models_to_evaluate":100,
     "prepared_dataset_path": "datasets/evaluated_dataset/",
     "output_path": "output/",

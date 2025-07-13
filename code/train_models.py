@@ -16,7 +16,7 @@ from nni.nas.evaluator.pytorch import DataLoader, Lightning, Trainer
 from nni.nas.space import model_context
 from tqdm import tqdm
 
-from DartsSpace import DARTS_with_CIFAR100 as DartsSpace
+from utils_nni.DartsSpace import DARTS_with_CIFAR100 as DartsSpace
 from dependencies.darts_classification_module import DartsClassificationModule
 from dependencies.train_config import TrainConfig
 from dependencies.data_generator import generate_arch_dicts
@@ -356,6 +356,7 @@ class DiversityNESRunner:
         for i, acc in enumerate(model_accs):
             print(f"Model {i+1} Top-1 Accuracy: {acc:.2f}%")
 
+        shutil.rmtree(self.config.output_path, ignore_errors=True)
         os.makedirs(self.config.output_path, exist_ok=True)
         out_file = os.path.join(self.config.output_path, "ensemble_results.txt")
         with open(out_file, "w") as f:
