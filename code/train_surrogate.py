@@ -46,7 +46,7 @@ class SurrogateTrainer:
         for i, file_path in enumerate(tqdm(
             self.dataset_path.rglob("*.json"), desc="Loading dataset"
         )):
-            if i >= self.n_models:
+            if i >= self.config.n_models:
                 break
             try:
                 data = json.loads(file_path.read_text(encoding="utf-8"))
