@@ -2,12 +2,10 @@ IMAGE_NAME="surrogate-nes-image"
 
 docker build -t $IMAGE_NAME . -f Dockerfile
 
-# Установка XAUTH если не задана
 if [ -z "$XAUTH" ]; then
     XAUTH=/tmp/.docker.xauth
 fi
 
-# Создание xauth файла если не существует
 if [ ! -f $XAUTH ]; then
     xauth_list=$(xauth nlist $DISPLAY 2>/dev/null | sed -e 's/^..../ffff/')
     if [ ! -z "$xauth_list" ]; then
@@ -18,7 +16,6 @@ if [ ! -f $XAUTH ]; then
     chmod a+r $XAUTH
 fi
 
-# Запуск контейнера
 docker run \
     -it \
     --rm \
@@ -29,6 +26,7 @@ docker run \
     -p 6012:6011 \
     -e DISPLAY=$DISPLAY \
     --shm-size=64g \
+    -v ./code:/app/code \
     -v /tmp/.X11-unix:/tmp/.X11-unix \
     --env LIBGL_ALWAYS_SOFTWARE=1 \
     --volume="$XAUTH:$XAUTH" \
