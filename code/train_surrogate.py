@@ -43,28 +43,26 @@ class SurrogateTrainer:
         self.dataset_path = Path(config.dataset_path)
 
     def load_dataset(self) -> None:
+        self.config.models_dict_path = []
         for i, file_path in enumerate(tqdm(
             self.dataset_path.rglob("*.json"), desc="Loading dataset"
         )):
-            if i >= self.config.n_models:
-                break
-            try:
-                data = json.loads(file_path.read_text(encoding="utf-8"))
-                self.config.models_dict.append(data)
-            except json.JSONDecodeError as e:
-                logger.error("Error decoding JSON from %s: %s", file_path, e)
-        if len(self.config.models_dict) < self.config.n_models:
+            self.config.models_dict_path.append(file_path)
+
+        if len(self.config.models_dict_path) < self.config.n_models:
             raise ValueError(
-                f"Only {len(self.config.models_dict)} models found, but n_models={self.config.n_models}"
+                f"Only {len(self.config.models_dict_path)} model paths found, but n_models={self.config.n_models}"
             )
 
-        self.config.models_dict = random.sample(
-            self.config.models_dict, self.config.n_models
+        self.config.models_dict_path = random.sample(
+            self.config.models_dict_path, self.config.n_models
         )
 
     def _prepare_predictions(self, num_samples: Optional[int] = None):
         preds = []
-        for data in self.config.models_dict:
+        for path in self.config.models_dict_path:
+            with path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
             arr = np.array(data["test_predictions"])
             preds.append(arr[:num_samples] if num_samples else arr)
         return preds
@@ -92,14 +90,18 @@ class SurrogateTrainer:
         D[M < lower[:, None]] = -1
         self.config.discrete_diversity_matrix = D
 
-    def convert_into_graphs(self) -> None:
-        self.config.graphs = [
-            Graph(d, index=i) for i, d in enumerate(self.config.models_dict)
-        ]
+    def get_accuracies(self):
+        accs = []
+        for path in self.config.models_dict_path:
+            with path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+            accs.append(data["test_accuracy"])
+        return accs
+
 
     def create_datasets(self) -> None:
-        accs = [d["test_accuracy"] for d in self.config.models_dict]
-        ds = CustomDataset(self.config.graphs, accs)
+        accs = self.get_accuracies()
+        ds = CustomDataset(self.config.models_dict_path, accs)
         train_n = int(self.config.train_size * self.config.n_models)
         self.config.base_train_dataset, self.config.base_valid_dataset = random_split(
             ds, [train_n, self.config.n_models - train_n]
@@ -222,12 +224,19 @@ if __name__ == "__main__":
     config = TrainConfig(**params)
 
     trainer = SurrogateTrainer(config)
+    print("Loading models")
     trainer.load_dataset()
+    print("Getting diversuty matrix")
     trainer.get_diversity_matrix()
+    print("Creating discrete diversity matrix")
     trainer.create_discrete_diversity_matrix()
-    trainer.convert_into_graphs()
+    print("Creating datasets")
     trainer.create_datasets()
+    print("Creating dataloaders")
     trainer.create_dataloaders()
+    print("Training accuracy surrogate")
     trainer.train_accuracy_model()
+    print("Training diversity surrogate")
     trainer.train_diversity_model()
+    print("Saving models")
     trainer.save_models()

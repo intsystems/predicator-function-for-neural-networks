@@ -4,6 +4,8 @@ import torch.nn.functional as F
 import os
 import json
 import argparse
+import shutil
+from pathlib import Path
 
 from torch_geometric.utils import dense_to_sparse
 import matplotlib.pyplot as plt
@@ -81,6 +83,9 @@ class InferSurrogate:
         return dists.min().item()
 
     def architecture_search(self):
+        tmp_dir = Path(self.config.tmp_archs_path)
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        tmp_dir.mkdir(parents=True, exist_ok=True)
 
         while len(self.config.best_models) < self.config.n_ensemble_models:
             print(
@@ -90,11 +95,18 @@ class InferSurrogate:
             # 1) Сгенерировать архитектуры
             arch_dicts = generate_arch_dicts(
                 self.config.n_models_to_generate, use_tqdm=True
-            )  # list of dicts
+            )
 
-            # 2) Построить графы и датасет
-            graphs = [Graph(arch, index=i) for i, arch in enumerate(arch_dicts)]
-            dataset = CustomDataset(graphs, use_tqdm=True)
+            # 2) Сохраняем как JSON-файлы
+            arch_paths = []
+            for i, arch in enumerate(arch_dicts):
+                path = tmp_dir / f"arch_{len(os.listdir(tmp_dir)) + i}.json"
+                with path.open("w", encoding="utf-8") as f:
+                    json.dump(arch, f)
+                arch_paths.append(path)
+
+            # 3) Датасет и DataLoader
+            dataset = CustomDataset(arch_paths, use_tqdm=True)
             loader = DataLoader(
                 dataset,
                 batch_size=self.config.batch_size_inference,
@@ -103,7 +115,7 @@ class InferSurrogate:
                 collate_fn=collate_graphs,
             )
 
-            # 3) Извлечь эмбеддинги (numpy)
+            # 4) Извлечь эмбеддинги
             with torch.no_grad():
                 emb_acc_np, _ = extract_embeddings(
                     self.config.model_accuracy, loader, device, use_tqdm=True
@@ -112,47 +124,47 @@ class InferSurrogate:
                     self.config.model_diversity, loader, device, use_tqdm=True
                 )
 
-            # 4) Фильтрация по точности
-            mask = (
-                emb_acc_np >= self.config.min_accuracy_for_pool
-            )  # numpy boolean array, shape (N,)
+            # 5) Фильтрация по точности
+            mask = emb_acc_np >= self.config.min_accuracy_for_pool
+            valid_paths = [p for p, ok in zip(arch_paths, mask) if ok]
+            valid_div_embs = emb_div_np[mask].astype(np.float16)
+            valid_accs = emb_acc_np[mask]
 
-            valid_archs = [arch for arch, ok in zip(arch_dicts, mask) if ok]
-            valid_div_embs = emb_div_np[mask].astype(np.float16)  # shape (n_valid, d)
-            valid_accs = emb_acc_np[mask]  # shape (n_valid,)
-
-            for arch, emb, acc in zip(valid_archs, valid_div_embs, valid_accs):
+            # 6) Добавляем в пул
+            for path, emb, acc in zip(valid_paths, valid_div_embs, valid_accs):
+                arch = json.loads(path.read_text(encoding="utf-8"))
                 self.config.potential_archs.append(arch)
                 self.config.potential_embeddings.append(emb)
                 self.config.potential_accuracies.append(acc)
 
-            # 6) Очистка временных переменных и сборка мусора
-            del arch_dicts, graphs, dataset, loader
+            # 7) Удаляем все файлы, которые не попали в пул
+            kept = set(valid_paths)
+            for path in arch_paths:
+                if path not in kept and path.exists():
+                    path.unlink()
+
+            # 8) Очистка мусора
+            del arch_dicts, arch_paths, dataset, loader
             del emb_acc_np, emb_div_np
             torch.cuda.empty_cache()
             gc.collect()
 
-            # 7) Если пул заполнен — выбираем наиболее разнообразные модели
+            # 9) Если пул заполнен — выбираем наиболее разнообразные модели
             while (
                 len(self.config.potential_archs) >= self.config.n_models_in_pool
                 and len(self.config.best_models) < self.config.n_ensemble_models
             ):
                 if self.config.best_embeddings:
-                    best_arr = np.stack(
-                        self.config.best_embeddings
-                    )  # shape (len(best), d)
-                    # Для каждого emb в пуле — минимальное расстояние до best_arr
+                    best_arr = np.stack(self.config.best_embeddings)
                     distances = [
                         np.min(np.linalg.norm(emb - best_arr, axis=1))
                         for emb in self.config.potential_embeddings
                     ]
                 else:
-                    # Для первой модели ничем не ограничены
                     distances = [np.inf] * len(self.config.potential_embeddings)
 
                 farthest = int(np.argmax(distances))
 
-                # Добавляем в лучшие
                 self.config.best_models.append(
                     self.config.potential_archs.pop(farthest)
                 )
@@ -163,6 +175,9 @@ class InferSurrogate:
                 print(
                     f"Selected #{len(self.config.best_models)}/{self.config.n_ensemble_models}: acc={acc:.4f}, dist={distances[farthest]:.4f}"
                 )
+
+        # В конце удалим временные файлы полностью
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
     def select_central_models_by_clusters(self):
         """
