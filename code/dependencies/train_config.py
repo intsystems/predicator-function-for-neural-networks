@@ -39,7 +39,8 @@ class TrainConfig:
     batch_size_inference: int
     min_accuracy_for_pool: float
     plot_tsne: bool
-
+    
+    tmp_archs_path: str
     best_models_save_path: str
 
     prepared_dataset_path: str
@@ -62,8 +63,7 @@ class TrainConfig:
     # Internal fields
     model_accuracy: Optional[Any] = field(default=None, init=False)
     model_diversity: Optional[Any] = field(default=None, init=False)
-    models_dict: list = field(default_factory=list, init=False)
-    graphs: Optional[Any] = field(default=None, init=False)
+    models_dict_path: list = field(default_factory=list, init=False)
     diversity_matrix: Optional[np.ndarray] = field(default=None, init=False)
     discrete_diversity_matrix: Optional[np.ndarray] = field(default=None, init=False)
     base_train_dataset: Optional[Any] = field(default=None, init=False)

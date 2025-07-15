@@ -1,3 +1,7 @@
+import sys
+import os
+import json
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -21,6 +25,8 @@ from torch_geometric.data import Data, Batch
 from torch_geometric.loader import DataLoader
 from torch_geometric.utils import dropout_edge
 
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from Graph import Graph
 
 class SimpleGCN(nn.Module):
     def __init__(
@@ -232,39 +238,31 @@ class CustomDataset(Dataset):
         adj, features = CustomDataset.preprocess(adj, features)
         return graph.index, adj, features
 
-    def __init__(self, graphs, accuracies=None, use_tqdm=False):
-        self.indexes = []
-        self.adjs, self.features = [], []
+    def __init__(self, models_dict_path, accuracies=None, use_tqdm=False):
+        self.models_dict_path = models_dict_path
+
         self.accuracies = (
             torch.tensor(accuracies, dtype=torch.float)
             if accuracies is not None
             else None
         )
 
-        iterator = tqdm(graphs) if use_tqdm else graphs
-
-        results = Parallel(n_jobs=-1)(
-            delayed(CustomDataset.process_graph)(graph) for graph in iterator
-        )
-
-        for index, adj, features in results:
-            self.indexes.append(index)
-            self.adjs.append(adj)
-            self.features.append(features)
-
     def __getitem__(self, index):
-        adj = self.adjs[index]
-        features = self.features[index]
+        path = self.models_dict_path[index]
+        with path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        graph = Graph(data, index=index)
+        _, adj, features = self.process_graph(graph)
         edge_index, _ = dense_to_sparse(adj)
 
         data = Data(x=features, edge_index=edge_index)
-        data.index = self.indexes[index]
+        data.index = index
         if self.accuracies is not None:
             data.y = self.accuracies[index]
         return data
 
     def __len__(self):
-        return len(self.indexes)
+        return len(self.models_dict_path)
 
 
 class TripletGraphDataset(Dataset):
