@@ -1,11 +1,11 @@
 {
     "seed":42,
     "num_workers": 4,
-    "dataset_path": "datasets/third_dataset/",
-    "device": "cpu",
-    "developer_mode": true,
+    "dataset_path": "dataset_cifar100/results_cifar100",
+    "device": "cuda",
+    "developer_mode": false,
+    
     "n_models": 300,
-
     "upper_margin": 0.75,
     "lower_margin": 0.25,
     "diversity_matrix_metric": "overlap", 

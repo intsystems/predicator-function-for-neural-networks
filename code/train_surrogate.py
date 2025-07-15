@@ -65,7 +65,7 @@ class SurrogateTrainer:
     def _prepare_predictions(self, num_samples: Optional[int] = None):
         preds = []
         for data in self.config.models_dict:
-            arr = np.array(data["test_predictions"])
+            arr = np.array(data["valid_predictions"])
             preds.append(arr[:num_samples] if num_samples else arr)
         return preds
 
@@ -98,7 +98,7 @@ class SurrogateTrainer:
         ]
 
     def create_datasets(self) -> None:
-        accs = [d["test_accuracy"] for d in self.config.models_dict]
+        accs = [d["valid_accuracy"] for d in self.config.models_dict]
         ds = CustomDataset(self.config.graphs, accs)
         train_n = int(self.config.train_size * self.config.n_models)
         self.config.base_train_dataset, self.config.base_valid_dataset = random_split(
