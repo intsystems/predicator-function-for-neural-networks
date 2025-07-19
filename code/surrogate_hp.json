@@ -3,8 +3,8 @@
     "num_workers": 4,
     "dataset_path": "dataset_cifar100/results_cifar100",
     "device": "cuda",
-    "developer_mode": false,
-    
+    "developer_mode": true,
+
     "n_models": 300,
 
     "upper_margin": 0.75,
@@ -44,7 +44,7 @@
 
     "n_epochs_final": 1,
     "lr_final": 0.025,
-    "batch_size_final": 96,
+    "batch_size_final": 960,
     "dataset_name": "CIFAR10",
     "final_dataset_path": "datasets/final_dataset/",
     "evaluate_ensemble_flag": true,

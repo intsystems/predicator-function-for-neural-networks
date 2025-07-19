@@ -47,13 +47,7 @@ class DiversityNESRunner:
         self.config = config
         self.models = []
         self.model_id = 0
-        # Set random seeds for reproducibility
-        if config.seed is not None:
-            random.seed(config.seed)
-            np.random.seed(config.seed)
-            torch.manual_seed(config.seed)
-            if torch.cuda.is_available():
-                torch.cuda.manual_seed_all(config.seed)
+        
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
