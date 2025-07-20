@@ -87,7 +87,7 @@ class DiversityNESRunner:
         """
         Create training and validation data loaders for the chosen dataset.
         """
-        bs = batch_size or self.config.batch_size
+        bs = batch_size or self.config.batch_size_final
         transform = transforms.Compose(
             self.base_transform
             + [
@@ -201,7 +201,8 @@ class DiversityNESRunner:
             evaluator.fit(model)
             self.models.append(model)
 
-            torch.save(model.state_dict(), f'{self.config.best_models_save_path}_trained/model_{model_id}.pth')
+            print(f"Saving model {model_id} to {self.config.best_models_save_path}_trained")
+            torch.save(model.state_dict(), Path(self.config.best_models_save_path) / f'model_{model_id}.pth')
 
             return model
 
@@ -329,6 +330,8 @@ class DiversityNESRunner:
                     bin_idx = torch.bucketize(conf, bin_boundaries, right=True) - 1
                     if bin_idx < 0:  # Handle case when confidence is exactly 0.0
                         bin_idx = 0
+                    if bin_idx == n_bins:
+                        bin_idx = n_bins - 1
                     bin_counts[bin_idx] += 1
                     bin_conf_sums[bin_idx] += conf
                     bin_acc_sums[bin_idx] += correct
