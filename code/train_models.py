@@ -206,6 +206,9 @@ class DiversityNESRunner:
             )
             evaluator.fit(model)
             self.models.append(model)
+
+            torch.save(model.state_dict(), f'{self.config.best_models_save_path}_trained/model_{model_id}.pth')
+
             return model
 
         except Exception as e:

@@ -5,8 +5,12 @@ __pycache__/
 
 code/data
 code/dataset
+code/dataset_cifar100
 code/lightning_logs
 code/datasets
+code/graphics
+code/output
+*.whl
 
 code/final_dataset/
 *.gz

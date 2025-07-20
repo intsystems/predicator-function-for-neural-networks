@@ -16,7 +16,7 @@ from torch_geometric.nn import (
 )
 from torch_geometric.utils import dense_to_sparse
 from torch.optim.lr_scheduler import StepLR, CosineAnnealingLR
-from tqdm.notebook import tqdm
+from tqdm import tqdm
 import matplotlib.pyplot as plt
 import numpy as np
 from torch.utils.data import Dataset

@@ -63,7 +63,7 @@ class SurrogateTrainer:
         for path in self.config.models_dict_path:
             with path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
-            arr = np.array(data["test_predictions"])
+            arr = np.array(data["valid_predictions"])
             preds.append(arr[:num_samples] if num_samples else arr)
         return preds
 
@@ -95,7 +95,7 @@ class SurrogateTrainer:
         for path in self.config.models_dict_path:
             with path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
-            accs.append(data["test_accuracy"])
+            accs.append(data["valid_accuracy"])
         return accs
 
 

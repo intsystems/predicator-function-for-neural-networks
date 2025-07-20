@@ -10,7 +10,7 @@ from PIL import Image
 import json
 import os
 
-from tqdm.notebook import tqdm
+from tqdm import tqdm
 from joblib import Parallel, delayed
 
 

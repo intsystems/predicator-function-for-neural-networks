@@ -46,6 +46,8 @@ class TrainConfig:
     prepared_dataset_path: str
     evaluate_ensemble_flag: bool
 
+    random_choice_out_of_best: bool
+
     n_epochs_final: int
     lr_final: float
     batch_size_final: int
