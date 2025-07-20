@@ -10,6 +10,7 @@ code/lightning_logs
 code/datasets
 code/graphics
 code/output
+code/surrogate_models
 *.whl
 
 code/final_dataset/
