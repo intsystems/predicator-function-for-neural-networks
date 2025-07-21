@@ -227,53 +227,56 @@ class InferSurrogate:
             self.config.selected_accs.append(accs[best_global])
             self.config.selected_indices.append(best_global)
         
-        if self.config.plot_tsne:
-            print("start painting")
-            # 2-step reduction: PCA -> 50d, then t-SNE -> 2d
-            pca50 = PCA(n_components=50, random_state=self.config.seed)
-            X50 = pca50.fit_transform(X)
-            C50 = pca50.transform(centroids)
+        self.paint_tsne(X, centroids, cluster_ids)
+    
+    def paint_tsne(self, X, centroids, cluster_ids):
+        # 2-step reduction: PCA -> 50d, then t-SNE -> 2d
+        pca50 = PCA(n_components=50, random_state=self.config.seed)
+        X50 = pca50.fit_transform(X)
+        C50 = pca50.transform(centroids)
 
-            # объединяем для единой t-SNE
-            combined = np.vstack([X50, C50])
-            tsne2 = TSNE(n_components=2, random_state=self.config.seed)
-            Y = tsne2.fit_transform(combined)
+        # объединяем для единой t-SNE
+        combined = np.vstack([X50, C50])
+        tsne2 = TSNE(n_components=2, random_state=self.config.seed)
+        Y = tsne2.fit_transform(combined)
 
-            proj_X = Y[: X.shape[0]]
-            proj_C = Y[X.shape[0] : X.shape[0] + self.config.n_ensemble_models]
-            proj_sel = proj_X[self.config.selected_indices]
+        proj_X = Y[: X.shape[0]]
+        proj_C = Y[X.shape[0] : X.shape[0] + self.config.n_ensemble_models]
+        proj_sel = proj_X[self.config.selected_indices]
 
-            plt.figure(figsize=(10, 8))
-            plt.rc("font", size=20)
-            plt.scatter(
-                proj_X[:, 0],
-                proj_X[:, 1],
-                c=cluster_ids,
-                cmap="tab10",
-                alpha=0.4,
-                label="All models",
-            )
-            plt.scatter(
-                proj_C[:, 0],
-                proj_C[:, 1],
-                c="black",
-                marker="X",
-                s=100,
-                label="Centroids",
-            )
-            plt.scatter(
-                proj_sel[:, 0],
-                proj_sel[:, 1],
-                c="red",
-                marker="*",
-                s=150,
-                label="Chosen models",
-            )
-            # plt.title("t-SNE проекция эмбеддингов после PCA-50")
-            plt.legend()
-            plt.grid(True)
-            plt.tight_layout()
-            plt.show()
+        os.makedirs("logs", exist_ok=True)
+        plt.figure(figsize=(10, 8))
+        plt.rc("font", size=20)
+        plt.scatter(
+            proj_X[:, 0],
+            proj_X[:, 1],
+            c=cluster_ids,
+            cmap="tab10",
+            alpha=0.4,
+            label="All models",
+        )
+        plt.scatter(
+            proj_C[:, 0],
+            proj_C[:, 1],
+            c="black",
+            marker="X",
+            s=100,
+            label="Centroids",
+        )
+        plt.scatter(
+            proj_sel[:, 0],
+            proj_sel[:, 1],
+            c="red",
+            marker="*",
+            s=150,
+            label="Chosen models",
+        )
+        # plt.title("t-SNE проекция эмбеддингов после PCA-50")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig("logs/tsne.png")
+        plt.close()
 
     def save_models(self):
         shutil.rmtree(self.config.best_models_save_path, ignore_errors=True)
