@@ -46,7 +46,7 @@
     "n_epochs_final": 3,
     "lr_final": 0.025,
     "batch_size_final": 96,
-    "dataset_name": "CIFAR100",
+    "dataset_name": "CIFAR10",
 
     "final_dataset_path": "datasets/final_dataset/",
     "evaluate_ensemble_flag": true,

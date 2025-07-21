@@ -1,8 +1,6 @@
-import math
+import torch
 
-def binom(n, m):
-    return math.factorial(n) // (math.factorial(n - m) * math.factorial(m))
-
-result = binom(2, 2) * binom(3, 2) * binom(4, 2) * binom(5, 2) * 7 ** 8
-
-print(result // 1e9)
+a = 1
+b = torch.tensor([1, 1, 1])
+if torch.all(a == b):       # вернёт 0‑d tensor с True/False
+    print("hello world")

@@ -47,7 +47,7 @@ class DiversityNESRunner:
         self.config = config
         self.models = []
         self.model_id = 0
-        
+
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
@@ -56,25 +56,18 @@ class DiversityNESRunner:
             self.MEAN = [0.4914, 0.4822, 0.4465]
             self.STD = [0.2470, 0.2435, 0.2616]
             self.img_size = 32
-            self.base_transform = [
-                transforms.RandomCrop(32, padding=4),
-                transforms.RandomHorizontalFlip(),
-            ]
+            self.base_transform = []
         elif config.dataset_name.lower() == "cifar100":
             self.MEAN = [0.5071, 0.4867, 0.4408]
             self.STD = [0.2673, 0.2564, 0.2762]
             self.img_size = 32
-            self.base_transform = [
-                transforms.RandomCrop(32, padding=4),
-                transforms.RandomHorizontalFlip(),
-            ]
+            self.base_transform = []
         elif config.dataset_name.lower() == "fashionmnist":
             self.MEAN = [0.2860406]
             self.STD = [0.35302424]
             self.img_size = 32
             self.base_transform = [
                 transforms.Resize(32),
-                transforms.RandomCrop(32, padding=4),
             ]
         else:
             raise ValueError(f"Unknown dataset: {config.dataset_name}")
@@ -88,7 +81,16 @@ class DiversityNESRunner:
         Create training and validation data loaders for the chosen dataset.
         """
         bs = batch_size or self.config.batch_size_final
-        transform = transforms.Compose(
+        train_transform = transforms.Compose(
+            self.base_transform
+            + [
+                transforms.ToTensor(),
+                transforms.Normalize(self.MEAN, self.STD),
+                transforms.RandomCrop(32, padding=4),
+                transforms.RandomHorizontalFlip(),
+            ]
+        )
+        test_transform = transforms.Compose(
             self.base_transform
             + [
                 transforms.ToTensor(),
@@ -110,34 +112,41 @@ class DiversityNESRunner:
             root=self.config.final_dataset_path,
             train=True,
             download=True,
-            transform=transform,
+            transform=train_transform,
         )
         test_data = nni.trace(dataset_cls)(
             root=self.config.final_dataset_path,
             train=False,
             download=True,
-            transform=transform,
+            transform=test_transform,
         )
+
         num_samples = len(train_data)
         indices = list(range(num_samples))
         np.random.shuffle(indices)
-        split = int(num_samples * self.config.train_size)
+
+        if self.config.evaluate_ensemble_flag:
+            split = num_samples
+            valid_subset = None
+            valid_loader = None
+        else:
+            split = int(num_samples * self.config.train_size)
+            valid_subset = Subset(train_data, indices[split:])
+            valid_loader = DataLoader(
+                valid_subset,
+                batch_size=bs,
+                num_workers=self.config.num_workers,
+                shuffle=False,
+            )
 
         train_subset = Subset(train_data, indices[:split])
-        valid_subset = Subset(train_data, indices[split:])
-
         train_loader = DataLoader(
             train_subset,
             batch_size=bs,
             num_workers=self.config.num_workers,
             shuffle=True,
         )
-        valid_loader = DataLoader(
-            valid_subset,
-            batch_size=bs,
-            num_workers=self.config.num_workers,
-            shuffle=False,
-        )
+
         test_loader = DataLoader(
             test_data,
             batch_size=bs,
@@ -201,8 +210,14 @@ class DiversityNESRunner:
             evaluator.fit(model)
             self.models.append(model)
 
-            print(f"Saving model {model_id} to {self.config.best_models_save_path}_trained")
-            torch.save(model.state_dict(), Path(self.config.best_models_save_path) / f'model_{model_id}.pth')
+            os.makedirs(Path(self.config.output_path) / "trained_models", exist_ok=True)
+            print(
+                f"Saving model {model_id} to {self.config.output_path} trained_models"
+            )
+            torch.save(
+                model.state_dict(),
+                Path(self.config.output_path) / "trained_models" / f"model_{model_id}.pth",
+            )
 
             return model
 
@@ -314,12 +329,11 @@ class DiversityNESRunner:
                     correct_models[idx] += (preds == labels).sum().item()
 
                     if avg_output is None:
-                        avg_output = torch.zeros_like(output)
-                    avg_output += output
+                        avg_output = torch.zeros_like(probs)
+                    avg_output += probs
 
                 avg_output /= len(valid_models)
-                ensemble_probs = avg_output.softmax(dim=1)
-                confidences, preds_ens = ensemble_probs.max(1)
+                confidences, preds_ens = avg_output.max(1)
                 correct_ens_batch = preds_ens == labels
                 correct_ensemble += correct_ens_batch.sum().item()
 
@@ -328,13 +342,15 @@ class DiversityNESRunner:
 
                 for conf, correct in zip(confidences, correct_ens_batch):
                     bin_idx = torch.bucketize(conf, bin_boundaries, right=True) - 1
-                    if bin_idx < 0:  # Handle case when confidence is exactly 0.0
-                        bin_idx = 0
-                    if bin_idx == n_bins:
-                        bin_idx = n_bins - 1
+                    bin_idx = bin_idx.clamp(
+                        min=0, max=n_bins - 1
+                    )  # Handle bin_idx = 0.0 and bin_idx = 1.0
+
                     bin_counts[bin_idx] += 1
                     bin_conf_sums[bin_idx] += conf
                     bin_acc_sums[bin_idx] += correct
+                if self.config.developer_mode:
+                    break
 
         # Calculate metrics
         ensemble_acc = 100.0 * correct_ensemble / total
@@ -356,7 +372,6 @@ class DiversityNESRunner:
         for i, acc in enumerate(model_accs):
             print(f"Model {i+1} Top-1 Accuracy: {acc:.2f}%")
 
-        shutil.rmtree(self.config.output_path, ignore_errors=True)
         os.makedirs(self.config.output_path, exist_ok=True)
         out_file = os.path.join(self.config.output_path, "ensemble_results.txt")
         with open(out_file, "w") as f:
@@ -380,6 +395,7 @@ class DiversityNESRunner:
 
         os.makedirs(self.config.output_path, exist_ok=True)
         if self.config.evaluate_ensemble_flag:
+            shutil.rmtree(self.config.output_path, ignore_errors=True)
             print("Loading architecture definitions...")
             arch_dicts = load_json_from_directory(self.config.best_models_save_path)
             if not arch_dicts:
@@ -394,7 +410,7 @@ class DiversityNESRunner:
 
         print(f"Starting training for {len(arch_dicts)} models...")
         archs = [d["architecture"] for d in arch_dicts]
-        
+
         if not self.config.evaluate_ensemble_flag:
             shutil.rmtree(self.config.prepared_dataset_path, ignore_errors=True)
 
@@ -402,7 +418,9 @@ class DiversityNESRunner:
             print(f"\nTraining model {idx+1}/{len(archs)}")
             model = self.train_model(arch, train_loader, valid_loader, idx)
             if not self.config.evaluate_ensemble_flag:
-                self.evaluate_and_save_results(model, arch, valid_loader, self.config.prepared_dataset_path)
+                self.evaluate_and_save_results(
+                    model, arch, valid_loader, self.config.prepared_dataset_path
+                )
 
         if self.config.evaluate_ensemble_flag:
             print("\nEvaluating ensemble...")
