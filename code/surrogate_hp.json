@@ -41,6 +41,7 @@
     "plot_tsne": false,
     "best_models_save_path": "best_models/",
     "tmp_archs_path": "datasets/tmp_archs/",
+    "random_choice_out_of_best" : true,
 
     "n_epochs_final": 3,
     "lr_final": 0.025,
@@ -49,7 +50,6 @@
 
     "final_dataset_path": "datasets/final_dataset/",
     "evaluate_ensemble_flag": true,
-    "random_choice_out_of_best" : true,
     "n_models_to_evaluate":100,
     "prepared_dataset_path": "datasets/evaluated_dataset/",
     "output_path": "output/",

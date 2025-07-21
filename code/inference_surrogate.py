@@ -177,7 +177,7 @@ class InferSurrogate:
             #     )
 
         # В конце удалим временные файлы полностью
-        # shutil.rmtree(tmp_dir, ignore_errors=True)
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
     def select_central_models_by_clusters(self):
         """
@@ -301,10 +301,6 @@ if __name__ == "__main__":
     inference = InferSurrogate(config)
     inference.initialize_models()
     inference.architecture_search()
-    
-    if config.random_choice_out_of_best:
-
-
-
+    # if config.random_choice_out_of_best:
     inference.select_central_models_by_clusters()
     inference.save_models()
