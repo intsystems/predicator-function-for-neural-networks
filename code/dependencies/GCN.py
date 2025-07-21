@@ -435,8 +435,7 @@ def train_model_diversity(
             f"Train Loss: {avg_train_loss:.4f}, Valid Loss: {avg_valid_loss:.4f}, LR: {lr:.6f}"
         )
 
-    if draw_figure:
-        plot_train_valid_losses(train_losses, valid_losses)
+    plot_train_valid_losses(train_losses, valid_losses, file_name="diversity_model.png")
 
     return train_losses, valid_losses
 
@@ -513,15 +512,15 @@ def train_model_accuracy(
             f"Valid Loss: {avg_valid_loss * 1e4:.4f}, LR: {lr:.6f}"
         )
 
-    if draw_figure:
-        tmp_train_losses = np.array(train_losses)
-        tmp_valid_losses = np.array(valid_losses) * 1e4
-        plot_train_valid_losses(tmp_train_losses, tmp_valid_losses)
+    tmp_train_losses = np.array(train_losses)
+    tmp_valid_losses = np.array(valid_losses) * 1e4
+    plot_train_valid_losses(tmp_train_losses, tmp_valid_losses, file_name="accuracy_model.png")
 
     return train_losses, valid_losses
 
 
-def plot_train_valid_losses(train_losses, valid_losses):
+def plot_train_valid_losses(train_losses, valid_losses, file_name="train_valid_losses.png"):
+    os.makedirs("logs", exist_ok=True)
     plt.figure(figsize=(12, 6))
     plt.rc("font", size=20)
     plt.plot(
@@ -535,7 +534,8 @@ def plot_train_valid_losses(train_losses, valid_losses):
     plt.grid(True)
     plt.legend()
     plt.tight_layout()
-    plt.show()
+    plt.savefig("logs/" + file_name)
+    plt.close()
 
 
 def get_positive_and_negative(diversity_matrix, indices, dataset=None):

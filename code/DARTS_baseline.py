@@ -25,14 +25,21 @@ class DeepEnsBaseline(DiversityNESRunner):
     def __init__(self, config: TrainConfig):
         super().__init__(config)
 
-        if self.config.dataset_name.lower() == "cifar10":
-            self.dataset = "cifar"
-        elif self.config.dataset_name.lower() == "cifar100":
-            self.dataset = "cifar100"
-        elif self.config.dataset_name.lower() == "fashionmnist":
-            self.dataset = "cifar"
-        else:
+        dataset_map = {
+            "cifar10": "cifar",
+            "cifar100": "cifar100",
+            "fashionmnist": "cifar"
+        }
+
+        if self.config.dataset_name.lower() not in dataset_map:
             raise ValueError(f"Unknown dataset: {self.config.dataset_name}")
+        self.dataset = dataset_map[self.config.dataset_name.lower()]
+
+        self.num_classes = {
+            "cifar10": 10,
+            "cifar100": 100,
+            "fashionmnist": 10
+        }[self.config.dataset_name.lower()]
     
     def get_best_models(self, train_loader, valid_loader):
         strategy = DartsStrategy(gradient_clip_val=5.)
@@ -44,7 +51,7 @@ class DeepEnsBaseline(DiversityNESRunner):
 
         devices_arg = 1 if self.device.type == "cuda" else "auto"
         accelerator = "gpu" if self.device.type == "cuda" else "cpu"
-        logger = TensorBoardLogger(save_dir="logs", name="deepens_darts")
+        tb_logger = TensorBoardLogger(save_dir="logs", name="deepens_darts")
 
         evaluator = Lightning(
             DartsClassificationModule(
@@ -60,7 +67,7 @@ class DeepEnsBaseline(DiversityNESRunner):
                 accelerator=accelerator,
                 devices=devices_arg,
                 enable_progress_bar=True,
-                logger=logger
+                logger=tb_logger
             ),
             train_dataloaders=train_loader,
             val_dataloaders=valid_loader,
@@ -72,12 +79,12 @@ class DeepEnsBaseline(DiversityNESRunner):
     
     def save_models(self):
         shutil.rmtree(self.config.best_models_save_path, ignore_errors=True)
-        os.makedirs(self.config.best_models_save_path, exist_ok=True)
+        path = Path(self.config.best_models_save_path)
+        path.mkdir(parents=True, exist_ok=True)
 
         for i, arch in enumerate(self.config.selected_archs, 1):
-            file_path = os.path.join(
-                self.config.best_models_save_path, f"model_{i:02d}.json"
-            )
+            file_path = path / f"model_{i:02d}.json"
+
             with open(file_path, "w") as f:
                 json.dump(arch, f, indent=4)
             print(f"Сохранена модель {i} в {file_path}")

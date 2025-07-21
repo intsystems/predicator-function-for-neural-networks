@@ -1,6 +1,7 @@
 import json
 import logging
 import random
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -13,6 +14,7 @@ import torch.nn.functional as F
 from torch.utils.data import random_split, DataLoader
 from scipy.spatial import distance
 import shutil
+import matplotlib.pyplot as plt
 
 # Custom imports
 import sys
@@ -44,9 +46,9 @@ class SurrogateTrainer:
 
     def load_dataset(self) -> None:
         self.config.models_dict_path = []
-        for i, file_path in enumerate(tqdm(
-            self.dataset_path.rglob("*.json"), desc="Loading dataset"
-        )):
+        for i, file_path in enumerate(
+            tqdm(self.dataset_path.rglob("*.json"), desc="Loading dataset")
+        ):
             self.config.models_dict_path.append(file_path)
 
         if len(self.config.models_dict_path) < self.config.n_models:
@@ -63,7 +65,12 @@ class SurrogateTrainer:
         for path in self.config.models_dict_path:
             with path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
-            arr = np.array(data["valid_predictions"])
+            prediction_name = (
+                "valid_predictions"
+                if "valid_predictions" in data
+                else "test_predictions"
+            )
+            arr = np.array(data[prediction_name])
             preds.append(arr[:num_samples] if num_samples else arr)
         return preds
 
@@ -76,10 +83,31 @@ class SurrogateTrainer:
                 if self.config.diversity_matrix_metric == "overlap":
                     dist = np.mean(preds[i] == preds[j])
                 elif self.config.diversity_matrix_metric == "js":
-                    dist = np.mean(np.sqrt(distance.jensenshannon(preds[i], preds[j])))
+                    dist = np.mean(distance.jensenshannon(preds[i], preds[j], axis=1))
                 self.config.diversity_matrix[i, j] = self.config.diversity_matrix[
                     j, i
                 ] = dist
+        self.log_diversities()
+
+    def log_diversities(self):
+        os.makedirs("logs/", exist_ok=True)
+        diversities = []
+        for i in tqdm(range(self.config.n_models)):
+            for j in range(i + 1, self.config.n_models):
+                diversities.append(self.config.diversity_matrix[i, j])
+        diversities = np.array(diversities)
+
+        plt.figure(figsize=(10, 6))
+
+        plt.hist(diversities, bins=50, edgecolor="black", weights=np.ones(len(diversities)) / len(diversities))
+        # plt.title("Distribution of Model Diversity")
+        plt.xlabel("Percentage of Differences", fontsize=18)
+        plt.ylabel("Percentage", fontsize=18)
+        plt.grid(axis='y', linestyle='--', alpha=0.7)
+        plt.xticks(fontsize=16)
+        plt.yticks(fontsize=16)
+        plt.savefig("logs/diversities.png")
+        plt.close()
 
     def create_discrete_diversity_matrix(self) -> None:
         M = self.config.diversity_matrix
@@ -95,9 +123,26 @@ class SurrogateTrainer:
         for path in self.config.models_dict_path:
             with path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
-            accs.append(data["valid_accuracy"])
+            accs.append(
+                data["valid_accuracy"]
+                if "valid_accuracy" in data
+                else data["test_accuracy"]
+            )
+        self.log_accuracies(accs)
         return accs
 
+    def log_accuracies(self, accs):
+        os.makedirs("logs/", exist_ok=True)
+        plt.figure(figsize=(10, 6))
+
+        plt.hist(accs, bins=50, edgecolor='black', color="green", weights=[1/len(accs)]*len(accs))
+        # plt.title('Distribution of Model Accuracies')
+        plt.xlabel('Accuracy', fontsize=18)
+        plt.ylabel('Percentage', fontsize=18)
+        plt.xticks(fontsize=16)
+        plt.yticks(fontsize=16)
+        plt.savefig("logs/accuracies.png")
+        plt.close()
 
     def create_datasets(self) -> None:
         accs = self.get_accuracies()
@@ -167,7 +212,6 @@ class SurrogateTrainer:
             device=self.device,
             developer_mode=self.config.developer_mode,
             final_lr=self.config.acc_final_lr,
-            draw_figure=self.config.draw_fig_acc,
         )
 
     def _triplet_loss(
@@ -197,7 +241,6 @@ class SurrogateTrainer:
             device=self.device,
             developer_mode=self.config.developer_mode,
             final_lr=self.config.div_final_lr,
-            draw_figure=self.config.draw_fig_div,
         )
 
     def save_models(self) -> None:

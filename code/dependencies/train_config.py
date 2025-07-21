@@ -21,7 +21,6 @@ class TrainConfig:
     acc_final_lr: float
     acc_dropout: float
     acc_n_heads: int
-    draw_fig_acc: bool
     div_num_epochs: int
     div_lr: float
     div_final_lr: float
@@ -29,7 +28,6 @@ class TrainConfig:
     div_n_heads: int
     margin: float
     div_output_dim: int
-    draw_fig_div: bool
     surrogate_inference_path: str
     input_dim: int
 
@@ -38,7 +36,6 @@ class TrainConfig:
     n_models_to_generate: int
     batch_size_inference: int
     min_accuracy_for_pool: float
-    plot_tsne: bool
     
     tmp_archs_path: str
     best_models_save_path: str
