@@ -16,6 +16,8 @@ from train_models import DiversityNESRunner
 from dependencies.darts_classification_module import DartsClassificationModule
 from utils_nni.DartsSpace import DARTS_with_CIFAR100 as DartsSpace
 
+from tqdm import tqdm
+
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -75,31 +77,26 @@ class DeepEnsBaseline(DiversityNESRunner):
 
         experiment = NasExperiment(model_space, evaluator, strategy)
         experiment.run()
-        return experiment.export_top_models(formatter='dict')
-    
-    def save_models(self):
-        shutil.rmtree(self.config.best_models_save_path, ignore_errors=True)
-        path = Path(self.config.best_models_save_path)
-        path.mkdir(parents=True, exist_ok=True)
-
-        for i, arch in enumerate(self.config.selected_archs, 1):
-            file_path = path / f"model_{i:02d}.json"
-
-            with open(file_path, "w") as f:
-                json.dump(arch, f, indent=4)
-            print(f"Сохранена модель {i} в {file_path}")
-
+        return experiment.export_top_models(formatter='dict')[0]
 
     def run(self):
         self.config.selected_archs = []
-        for i in range(self.config.n_ensemble_models):
-            print(f"Поиск модели {i+1} из {self.config.n_ensemble_models}")
-            train_loader, valid_loader, _ = self.get_data_loaders()
-            top_models = self.get_best_models(train_loader, valid_loader)
-            self.config.selected_archs.append(top_models[0])
-    
+        shutil.rmtree(self.config.output_path, ignore_errors=True)
+
+        for idx, _ in enumerate(tqdm(range(self.config.n_ensemble_models), desc="Finding best architectures")):
+            train_loader, valid_loader, test_loader = self.get_data_loaders(seed=self.config.seed + idx * 10)
+            self.config.selected_archs.append(self.get_best_models(train_loader, valid_loader))
+        
+        for idx, arch in enumerate(tqdm(self.config.selected_archs, desc="Training models")):
+            print(f"\nTraining model {idx+1}/{len(self.config.selected_archs)}")
+            self.train_model(arch, train_loader, valid_loader, idx, save_dir_name="DARTS_baseline_models")
+
+        print("\nEvaluating ensemble...")
+        stats = self.collect_ensemble_stats(test_loader)
+        self.finalize_ensemble_evaluation(stats, "DARTS_baseline_results.txt")
+
+        print("\nAll models processed successfully!")
         print(f"Выбрано и сохранено {len(self.config.selected_archs)} моделей.")
-        self.save_models()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="DARTS NAS Runner")
@@ -115,6 +112,7 @@ if __name__ == "__main__":
     params.update({"device": "cuda:0" if torch.cuda.is_available() else "cpu"})
     config = TrainConfig(**params)
 
+    config.evaluate_ensemble_flag = False #need for get validation loader\
     runner = DeepEnsBaseline(config)
     runner.run()
     

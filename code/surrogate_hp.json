@@ -5,7 +5,7 @@
     "device": "cuda",
     "developer_mode": false,
 
-    "n_models": 300,
+    "n_models": 1300,
 
     "upper_margin": 0.75,
     "lower_margin": 0.25,
@@ -16,14 +16,14 @@
     "input_dim":8,
 
     "acc_num_epochs": 10,
-    "acc_lr": 1e-2,
-    "acc_final_lr": 5e-4,
+    "acc_lr_start": 1e-2,
+    "acc_lr_end": 1e-3,
     "acc_dropout": 0.2,
     "acc_n_heads": 16,
 
-    "div_num_epochs": 5,
-    "div_lr": 1e-3,
-    "div_final_lr": 1e-6,
+    "div_num_epochs": 10,
+    "div_lr_start": 1e-3,
+    "div_lr_end": 1e-4,
     "div_dropout": 0.1,
     "div_n_heads": 4,
     "margin": 1,
@@ -31,7 +31,7 @@
 
     "surrogate_inference_path": "surrogate_models/",
 
-    "n_ensemble_models": 5,
+    "n_ensemble_models": 4,
     "n_models_in_pool": 256,
     "n_models_to_generate": 1000,
     "batch_size_inference": 1000,

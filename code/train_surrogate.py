@@ -200,7 +200,7 @@ class SurrogateTrainer:
             heads=self.config.acc_n_heads,
         )
         opt = torch.optim.AdamW(
-            self.config.model_accuracy.parameters(), lr=self.config.acc_lr
+            self.config.model_accuracy.parameters(), lr=self.config.acc_lr_start
         )
         train_model_accuracy(
             self.config.model_accuracy,
@@ -211,7 +211,7 @@ class SurrogateTrainer:
             self.config.acc_num_epochs,
             device=self.device,
             developer_mode=self.config.developer_mode,
-            final_lr=self.config.acc_final_lr,
+            final_lr=self.config.acc_lr_end,
         )
 
     def _triplet_loss(
@@ -229,7 +229,7 @@ class SurrogateTrainer:
             heads=self.config.div_n_heads,
         )
         opt = torch.optim.AdamW(
-            self.config.model_diversity.parameters(), lr=self.config.div_lr
+            self.config.model_diversity.parameters(), lr=self.config.div_lr_start
         )
         train_model_diversity(
             self.config.model_diversity,
@@ -240,7 +240,7 @@ class SurrogateTrainer:
             self.config.div_num_epochs,
             device=self.device,
             developer_mode=self.config.developer_mode,
-            final_lr=self.config.div_final_lr,
+            final_lr=self.config.div_lr_end,
         )
 
     def save_models(self) -> None:
