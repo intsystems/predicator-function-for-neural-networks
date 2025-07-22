@@ -229,6 +229,22 @@ class InferSurrogate:
         
         self.paint_tsne(X, centroids, cluster_ids)
     
+    def random_choice_out_of_best(self):
+        X = np.array(self.config.potential_embeddings, dtype=np.float32)
+        accs = np.array(self.config.potential_accuracies, dtype=np.float32)
+
+        print(X.shape)
+        raise "KUKU"
+
+        for i in range(self.config.n_ensemble_models):
+            chosen = np.random.randint()
+            self.config.selected_archs.append(self.config.potential_archs[best_global])
+            self.config.selected_embs.append(X[best_global])
+            self.config.selected_accs.append(accs[best_global])
+            self.config.selected_indices.append(best_global)
+
+
+    
     def paint_tsne(self, X, centroids, cluster_ids):
         # 2-step reduction: PCA -> 50d, then t-SNE -> 2d
         pca50 = PCA(n_components=50, random_state=self.config.seed)
@@ -304,6 +320,8 @@ if __name__ == "__main__":
     inference = InferSurrogate(config)
     inference.initialize_models()
     inference.architecture_search()
-    # if config.random_choice_out_of_best:
-    inference.select_central_models_by_clusters()
+    if config.random_choice_out_of_best:
+        pass
+    else:
+        inference.select_central_models_by_clusters()
     inference.save_models()
