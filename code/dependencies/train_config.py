@@ -17,13 +17,13 @@ class TrainConfig:
     train_size: float
     batch_size: int
     acc_num_epochs: int
-    acc_lr: float
-    acc_final_lr: float
+    acc_lr_start: float
+    acc_lr_end: float
     acc_dropout: float
     acc_n_heads: int
     div_num_epochs: int
-    div_lr: float
-    div_final_lr: float
+    div_lr_start: float
+    div_lr_end: float
     div_dropout: float
     div_n_heads: int
     margin: float

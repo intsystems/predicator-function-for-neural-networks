@@ -8,8 +8,17 @@ code/results*
 code/best_models
 code/data
 code/datasets
+code/evaluated_dataset
+code/surrogate_models
 code/dataset_cifar100
+code/best_models
+code/graphics
+code/output
+code/logs
+code/for_kaggle.sh
 *lightning_logs*
+
+*.zip
 
 ### Git ###
 # Created by git for backups. To disable backups in Git:

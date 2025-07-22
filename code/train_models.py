@@ -80,7 +80,7 @@ class DiversityNESRunner:
         """
         Create training and validation data loaders for the chosen dataset.
         """
-        bs = batch_size or self.config.batch_size_final
+        bs = batch_size if batch_size else self.config.batch_size_final
         train_transform = transforms.Compose(
             self.base_transform
             + [
@@ -162,6 +162,7 @@ class DiversityNESRunner:
         train_loader: DataLoader,
         valid_loader: DataLoader,
         model_id: int,
+        save_dir_name = "trained_models"
     ) -> torch.nn.Module:
         """
         Train a single model defined by architecture and return the trained model.
@@ -210,13 +211,13 @@ class DiversityNESRunner:
             evaluator.fit(model)
             self.models.append(model)
 
-            os.makedirs(Path(self.config.output_path) / "trained_models", exist_ok=True)
+            os.makedirs(Path(self.config.output_path) / save_dir_name, exist_ok=True)
             print(
-                f"Saving model {model_id} to {self.config.output_path} trained_models"
+                f"Saving model {model_id} to {self.config.output_path} {save_dir_name}"
             )
             torch.save(
                 model.state_dict(),
-                Path(self.config.output_path) / "trained_models" / f"model_{model_id}.pth",
+                Path(self.config.output_path) / save_dir_name / f"model_{model_id}.pth",
             )
 
             return model
@@ -283,21 +284,17 @@ class DiversityNESRunner:
         print(f"Results for model_{self.model_id} saved to {file_path}")
         self.model_id += 1
 
-    def evaluate_ensemble(self, test_loader):
-        """
-        Evaluate ensemble of models: compute Top-1 accuracy and Expected Calibration Error (ECE),
-        save and print results.
-        """
+    def collect_ensemble_stats(self, test_loader):
         if not hasattr(self, "models") or not self.models:
             print("No models available for ensemble evaluation.")
-            return None, None, None
+            return None
 
         main_device = "cuda:0" if torch.cuda.is_available() else "cpu"
         valid_models = [m for m in self.models if m is not None]
 
         if not valid_models:
             print("No valid models for ensemble evaluation.")
-            return None, None, None
+            return None
 
         for i, model in enumerate(valid_models):
             valid_models[i] = model.to(main_device).eval()
@@ -306,7 +303,7 @@ class DiversityNESRunner:
         correct_ensemble = 0
         correct_models = [0] * len(valid_models)
 
-        # For ECE calculation
+        # For ECE
         n_bins = self.config.n_ece_bins
         bin_boundaries = torch.linspace(0, 1, n_bins + 1)
         bin_conf_sums = torch.zeros(n_bins)
@@ -320,10 +317,8 @@ class DiversityNESRunner:
                 total += batch_size
 
                 avg_output = None
-
                 for idx, model in enumerate(valid_models):
                     output = model(images)
-
                     probs = output.softmax(dim=1)
                     _, preds = probs.max(1)
                     correct_models[idx] += (preds == labels).sum().item()
@@ -342,21 +337,43 @@ class DiversityNESRunner:
 
                 for conf, correct in zip(confidences, correct_ens_batch):
                     bin_idx = torch.bucketize(conf, bin_boundaries, right=True) - 1
-                    bin_idx = bin_idx.clamp(
-                        min=0, max=n_bins - 1
-                    )  # Handle bin_idx = 0.0 and bin_idx = 1.0
+                    bin_idx = bin_idx.clamp(min=0, max=n_bins - 1)
 
                     bin_counts[bin_idx] += 1
                     bin_conf_sums[bin_idx] += conf
                     bin_acc_sums[bin_idx] += correct
+
                 if self.config.developer_mode:
                     break
 
-        # Calculate metrics
+        return {
+            "total": total,
+            "correct_ensemble": correct_ensemble,
+            "correct_models": correct_models,
+            "bin_counts": bin_counts,
+            "bin_conf_sums": bin_conf_sums,
+            "bin_acc_sums": bin_acc_sums,
+            "n_bins": n_bins,
+            "num_models": len(valid_models),
+        }
+
+
+    def finalize_ensemble_evaluation(self, stats, output_filename="ensemble_results.txt"):
+        if stats is None:
+            return None, None, None
+
+        total = stats["total"]
+        correct_ensemble = stats["correct_ensemble"]
+        correct_models = stats["correct_models"]
+        bin_counts = stats["bin_counts"]
+        bin_conf_sums = stats["bin_conf_sums"]
+        bin_acc_sums = stats["bin_acc_sums"]
+        n_bins = stats["n_bins"]
+        num_models = stats["num_models"]
+
         ensemble_acc = 100.0 * correct_ensemble / total
         model_accs = [100.0 * c / total for c in correct_models]
 
-        # Calculate ECE
         ece = 0.0
         for i in range(n_bins):
             if bin_counts[i] > 0:
@@ -365,19 +382,20 @@ class DiversityNESRunner:
                 bin_weight = bin_counts[i] / total
                 ece += bin_weight * abs(bin_conf_avg - bin_acc_avg)
 
-        # Print and save results
+        # Print results
         print(f"\nEnsemble Evaluation Results:")
         print(f"Ensemble Top-1 Accuracy: {ensemble_acc:.2f}%")
         print(f"Ensemble ECE: {ece:.4f}")
         for i, acc in enumerate(model_accs):
             print(f"Model {i+1} Top-1 Accuracy: {acc:.2f}%")
 
+        # Save to file
         os.makedirs(self.config.output_path, exist_ok=True)
-        out_file = os.path.join(self.config.output_path, "ensemble_results.txt")
+        out_file = os.path.join(self.config.output_path, output_filename)
         with open(out_file, "w") as f:
             f.write(f"Ensemble Top-1 Accuracy: {ensemble_acc:.2f}%\n")
             f.write(f"Ensemble ECE: {ece:.4f}\n")
-            f.write(f"Number of models: {len(valid_models)}\n")
+            f.write(f"Number of models: {num_models}\n")
             for i, acc in enumerate(model_accs):
                 f.write(f"Model {i+1} Accuracy: {acc:.2f}%\n")
 
@@ -424,7 +442,8 @@ class DiversityNESRunner:
 
         if self.config.evaluate_ensemble_flag:
             print("\nEvaluating ensemble...")
-            self.evaluate_ensemble(test_loader)
+            stats = self.collect_ensemble_stats(test_loader)
+            self.finalize_ensemble_evaluation(stats, "ensemble_results.txt")
 
         print("\nAll models processed successfully!")
 
