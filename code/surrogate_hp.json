@@ -1,5 +1,5 @@
 {
-    "seed":42,
+    "seed":"None",
     "num_workers": 4,
     "dataset_path": "dataset_cifar100/results_cifar100",
     "device": "cuda",
