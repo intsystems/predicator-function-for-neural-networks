@@ -1,11 +1,11 @@
 {
     "seed":42,
     "num_workers": 4,
-    "dataset_path": "dataset_cifar100/results_cifar100",
+    "dataset_path": "datasets/third_dataset",
     "device": "cuda",
     "developer_mode": false,
 
-    "n_models": 1200,
+    "n_models": 1300,
 
     "upper_margin": 0.75,
     "lower_margin": 0.25,
@@ -38,9 +38,9 @@
     "min_accuracy_for_pool": 0.1,
     "best_models_save_path": "best_models/",
     "tmp_archs_path": "datasets/tmp_archs/",
-    "random_choice_out_of_best" : true,
+    "random_choice_out_of_best" : false,
 
-    "n_epochs_final": 1,
+    "n_epochs_final": 200,
     "lr_final": 0.025,
     "batch_size_final": 96,
     "dataset_name": "CIFAR100",

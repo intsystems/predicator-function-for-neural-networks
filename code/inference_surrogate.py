@@ -233,11 +233,8 @@ class InferSurrogate:
         X = np.array(self.config.potential_embeddings, dtype=np.float32)
         accs = np.array(self.config.potential_accuracies, dtype=np.float32)
 
-        print(X.shape)
-        raise "KUKU"
-
         for i in range(self.config.n_ensemble_models):
-            chosen = np.random.randint()
+            chosen = np.random.randint(X.shape[0])
             self.config.selected_archs.append(self.config.potential_archs[best_global])
             self.config.selected_embs.append(X[best_global])
             self.config.selected_accs.append(accs[best_global])
@@ -317,11 +314,14 @@ if __name__ == "__main__":
     params.update({"device": "cuda" if torch.cuda.is_available() else "cpu"})
     config = TrainConfig(**params)
 
+    if config.seed is None:
+        config.seed = np.randint(9999999)
+
     inference = InferSurrogate(config)
     inference.initialize_models()
     inference.architecture_search()
     if config.random_choice_out_of_best:
-        pass
+        inference.random_choice_out_of_best()
     else:
         inference.select_central_models_by_clusters()
     inference.save_models()

@@ -360,7 +360,7 @@ class DiversityNESRunner:
         }
 
 
-    def finalize_ensemble_evaluation(self, stats, output_filename="ensemble_results.txt"):
+    def finalize_ensemble_evaluation(self, stats):
         if stats is None:
             return None, None, None
 
@@ -393,7 +393,10 @@ class DiversityNESRunner:
 
         # Save to file
         os.makedirs(self.config.output_path, exist_ok=True)
-        out_file = os.path.join(self.config.output_path, output_filename)
+        experiment_num = 0
+        while os.path.exists(self.config.output_path, f'ensembles_results_{experiment_num}.txt')
+            experiment_num += 1
+        out_file = os.path.join(self.config.output_path, 'ensembles_results.txt')
         with open(out_file, "w") as f:
             f.write(f"Ensemble Top-1 Accuracy: {ensemble_acc:.2f}%\n")
             f.write(f"Ensemble ECE: {ece:.4f}\n")
@@ -414,7 +417,6 @@ class DiversityNESRunner:
             )
 
         if self.config.evaluate_ensemble_flag:
-            shutil.rmtree(self.config.output_path, ignore_errors=True)
             print("Loading architecture definitions...")
             arch_dicts = load_json_from_directory(self.config.best_models_save_path)
             if not arch_dicts:
@@ -445,7 +447,7 @@ class DiversityNESRunner:
         if self.config.evaluate_ensemble_flag:
             print("\nEvaluating ensemble...")
             stats = self.collect_ensemble_stats(test_loader)
-            self.finalize_ensemble_evaluation(stats, "ensemble_results.txt")
+            self.finalize_ensemble_evaluation(stats)
 
         print("\nAll models processed successfully!")
 
@@ -464,6 +466,9 @@ if __name__ == "__main__":
     params = json.loads(Path(args.hyperparameters_json).read_text())
     params.update({"device": "cuda:0" if torch.cuda.is_available() else "cpu"})
     config = TrainConfig(**params)
+
+    if config.seed is None:
+        config.seed = np.randint(9999999)
 
     runner = DiversityNESRunner(config)
     runner.run()
