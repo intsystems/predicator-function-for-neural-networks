@@ -20,6 +20,7 @@ code/for_kaggle.sh
 code/logs
 code/surrogate_models
 code/output
+code/start_all_dev.sh
 
 *.zip
 

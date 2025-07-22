@@ -394,9 +394,9 @@ class DiversityNESRunner:
         # Save to file
         os.makedirs(self.config.output_path, exist_ok=True)
         experiment_num = 0
-        while os.path.exists(self.config.output_path, f'ensembles_results_{experiment_num}.txt')
+        while os.path.exists(self.config.output_path, f'ensembles_results_{experiment_num}.txt'):
             experiment_num += 1
-        out_file = os.path.join(self.config.output_path, 'ensembles_results.txt')
+        out_file = os.path.join(self.config.output_path, f'ensembles_results_{experiment_num}.txt')
         with open(out_file, "w") as f:
             f.write(f"Ensemble Top-1 Accuracy: {ensemble_acc:.2f}%\n")
             f.write(f"Ensemble ECE: {ece:.4f}\n")
