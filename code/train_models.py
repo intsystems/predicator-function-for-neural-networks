@@ -412,7 +412,6 @@ class DiversityNESRunner:
                 f"Architecture directory {self.config.best_models_save_path} not found"
             )
 
-        os.makedirs(self.config.output_path, exist_ok=True)
         if self.config.evaluate_ensemble_flag:
             shutil.rmtree(self.config.output_path, ignore_errors=True)
             print("Loading architecture definitions...")
@@ -440,6 +439,7 @@ class DiversityNESRunner:
                 self.evaluate_and_save_results(
                     model, arch, valid_loader, self.config.prepared_dataset_path
                 )
+                self.models = []    # Doesn't need to save models in prepare dataset mode
 
         if self.config.evaluate_ensemble_flag:
             print("\nEvaluating ensemble...")
