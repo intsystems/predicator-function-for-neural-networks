@@ -467,8 +467,5 @@ if __name__ == "__main__":
     params.update({"device": "cuda:0" if torch.cuda.is_available() else "cpu"})
     config = TrainConfig(**params)
 
-    if config.seed is None:
-        config.seed = np.randint(9999999)
-
     runner = DiversityNESRunner(config)
     runner.run()

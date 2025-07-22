@@ -314,9 +314,6 @@ if __name__ == "__main__":
     params.update({"device": "cuda" if torch.cuda.is_available() else "cpu"})
     config = TrainConfig(**params)
 
-    if config.seed is None:
-        config.seed = np.randint(9999999)
-
     inference = InferSurrogate(config)
     inference.initialize_models()
     inference.architecture_search()

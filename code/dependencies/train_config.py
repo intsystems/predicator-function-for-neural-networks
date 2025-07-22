@@ -90,9 +90,12 @@ class TrainConfig:
             0 <= self.lower_margin < self.upper_margin <= 1
         ), "Margins must satisfy 0 ≤ lower < upper ≤ 1"
         assert 0 <= self.train_size <= 1, "train_size must be in [0,1]"
-        if self.seed is not None:
-            random.seed(self.seed)
-            np.random.seed(self.seed)
-            torch.manual_seed(self.seed)
-            if torch.cuda.is_available():
-                torch.cuda.manual_seed_all(self.seed)
+        
+        if self.seed == -1:
+            self.seed = np.random.randint(9999999)
+
+        random.seed(self.seed)
+        np.random.seed(self.seed)
+        torch.manual_seed(self.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(self.seed)
