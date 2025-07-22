@@ -76,7 +76,7 @@ class DiversityNESRunner:
             config.device if torch.cuda.is_available() else "cpu"
         )
 
-    def get_data_loaders(self, batch_size: int = None, seed=None) -> Tuple[DataLoader, DataLoader]:
+    def get_data_loaders(self, batch_size: int = None, seed=None) -> Tuple[DataLoader, DataLoader, DataLoader]:
         """
         Create training and validation data loaders for the chosen dataset.
         """
@@ -93,6 +93,7 @@ class DiversityNESRunner:
         test_transform = transforms.Compose(
             self.base_transform
             + [
+                transforms.Grayscale(num_output_channels=3),
                 transforms.ToTensor(),
                 transforms.Normalize(self.MEAN, self.STD),
             ]

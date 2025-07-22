@@ -3,7 +3,6 @@ import shutil
 import os
 import logging
 from pathlib import Path
-import shutil
 
 import argparse
 import torch
