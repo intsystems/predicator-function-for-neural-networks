@@ -359,8 +359,13 @@ class DiversityNESRunner:
             "num_models": len(valid_models),
         }
 
+    def _get_free_file_index(self, path: Path, file_name="ensembles_results"):
+        experiment_num = 0
+        while os.path.exists(path +  f'/{file_name}_{experiment_num}.txt'):
+            experiment_num += 1
+        return experiment_num
 
-    def finalize_ensemble_evaluation(self, stats):
+    def finalize_ensemble_evaluation(self, stats, file_name="ensembles_results"):
         if stats is None:
             return None, None, None
 
@@ -393,10 +398,8 @@ class DiversityNESRunner:
 
         # Save to file
         os.makedirs(self.config.output_path, exist_ok=True)
-        experiment_num = 0
-        while os.path.exists(self.config.output_path, f'ensembles_results_{experiment_num}.txt'):
-            experiment_num += 1
-        out_file = os.path.join(self.config.output_path, f'ensembles_results_{experiment_num}.txt')
+        experiment_num = self._get_free_file_index(self.config.output_path, file_name)
+        out_file = os.path.join(self.config.output_path, f'{file_name}_{experiment_num}.txt')
         with open(out_file, "w") as f:
             f.write(f"Ensemble Top-1 Accuracy: {ensemble_acc:.2f}%\n")
             f.write(f"Ensemble ECE: {ece:.4f}\n")
@@ -447,7 +450,7 @@ class DiversityNESRunner:
         if self.config.evaluate_ensemble_flag:
             print("\nEvaluating ensemble...")
             stats = self.collect_ensemble_stats(test_loader)
-            self.finalize_ensemble_evaluation(stats)
+            self.finalize_ensemble_evaluation(stats, "ensemble_results")
 
         print("\nAll models processed successfully!")
 

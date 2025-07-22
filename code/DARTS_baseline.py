@@ -1,5 +1,4 @@
 import json
-import shutil
 import os
 import logging
 from pathlib import Path
@@ -81,8 +80,7 @@ class DeepEnsBaseline(DiversityNESRunner):
 
     def run(self):
         self.config.selected_archs = []
-        shutil.rmtree(self.config.output_path, ignore_errors=True)
-
+        
         for idx, _ in enumerate(tqdm(range(self.config.n_ensemble_models), desc="Finding best architectures")):
             train_loader, valid_loader, test_loader = self.get_data_loaders(seed=self.config.seed + idx * 10)
             self.config.selected_archs.append(self.get_best_models(train_loader, valid_loader))
@@ -93,7 +91,7 @@ class DeepEnsBaseline(DiversityNESRunner):
 
         print("\nEvaluating ensemble...")
         stats = self.collect_ensemble_stats(test_loader)
-        self.finalize_ensemble_evaluation(stats, "DARTS_baseline_results.txt")
+        self.finalize_ensemble_evaluation(stats, "DARTS_baseline_results")
 
         print("\nAll models processed successfully!")
         print(f"Выбрано и сохранено {len(self.config.selected_archs)} моделей.")
