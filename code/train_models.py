@@ -255,7 +255,6 @@ class DiversityNESRunner:
 
         with torch.no_grad():
             for images, labels in valid_loader:
-                # print(labels)
                 images, labels = images.to(device), labels.to(device)
                 outputs = model(images)
                 outputs = torch.softmax(outputs, dim=1)
