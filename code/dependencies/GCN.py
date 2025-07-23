@@ -250,8 +250,8 @@ class CustomDataset(Dataset):
     def __getitem__(self, index):
         path = self.models_dict_path[index]
         with path.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-        graph = Graph(data, index=index)
+            model_dict = json.load(f)
+        graph = Graph(model_dict, index=index)
         _, adj, features = self.process_graph(graph)
         edge_index, _ = dense_to_sparse(adj)
 

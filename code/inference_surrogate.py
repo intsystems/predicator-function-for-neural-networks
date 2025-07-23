@@ -87,11 +87,6 @@ class InferSurrogate:
         shutil.rmtree(tmp_dir, ignore_errors=True)
         tmp_dir.mkdir(parents=True, exist_ok=True)
 
-        # while len(self.config.best_models) < self.config.n_ensemble_models:
-        #     print(
-        #         f"\nProgress: {len(self.config.best_models)}/{self.config.n_ensemble_models} selected, pool size {len(self.config.potential_archs)}/{self.config.n_models_in_pool}"
-        #     )
-
         # 1) Сгенерировать архитектуры
         arch_dicts = generate_arch_dicts(
             self.config.n_models_to_generate, use_tqdm=True
@@ -137,46 +132,8 @@ class InferSurrogate:
             self.config.potential_embeddings.append(emb)
             self.config.potential_accuracies.append(acc)
 
-        # 7) Удаляем все файлы, которые не попали в пул
-        kept = set(valid_paths)
-        for path in arch_paths:
-            if path not in kept and path.exists():
-                path.unlink()
-
-        # 8) Очистка мусора
-        del arch_dicts, arch_paths, dataset, loader
-        del emb_acc_np, emb_div_np
         torch.cuda.empty_cache()
         gc.collect()
-
-            # # 9) Если пул заполнен — выбираем наиболее разнообразные модели
-            # while (
-            #     len(self.config.potential_archs) >= self.config.n_models_in_pool
-            #     and len(self.config.best_models) < self.config.n_ensemble_models
-            # ):
-            #     if self.config.best_embeddings:
-            #         best_arr = np.stack(self.config.best_embeddings)
-            #         distances = [
-            #             np.min(np.linalg.norm(emb - best_arr, axis=1))
-            #             for emb in self.config.potential_embeddings
-            #         ]
-            #     else:
-            #         distances = [np.inf] * len(self.config.potential_embeddings)
-
-            #     farthest = int(np.argmax(distances))
-
-            #     self.config.best_models.append(
-            #         self.config.potential_archs.pop(farthest)
-            #     )
-            #     self.config.best_embeddings.append(
-            #         self.config.potential_embeddings.pop(farthest)
-            #     )
-            #     acc = self.config.potential_accuracies.pop(farthest)
-            #     print(
-            #         f"Selected #{len(self.config.best_models)}/{self.config.n_ensemble_models}: acc={acc:.4f}, dist={distances[farthest]:.4f}"
-            #     )
-
-        # В конце удалим временные файлы полностью
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
     def select_central_models_by_clusters(self):
@@ -196,7 +153,7 @@ class InferSurrogate:
         # Приводим к numpy
         X = np.array(self.config.potential_embeddings, dtype=np.float32)
         accs = np.array(self.config.potential_accuracies, dtype=np.float32)
-        
+
         # if len(X) > self.config.n_models_in_pool:
         #     X = X[:self.config.n_models_in_pool]
         #     accs = accs[:self.config.n_models_in_pool]
@@ -226,22 +183,20 @@ class InferSurrogate:
             self.config.selected_embs.append(X[best_global])
             self.config.selected_accs.append(accs[best_global])
             self.config.selected_indices.append(best_global)
-        
+
         self.paint_tsne(X, centroids, cluster_ids)
-    
+
     def random_choice_out_of_best(self):
         X = np.array(self.config.potential_embeddings, dtype=np.float32)
         accs = np.array(self.config.potential_accuracies, dtype=np.float32)
 
         for i in range(self.config.n_ensemble_models):
             chosen = np.random.randint(X.shape[0])
-            self.config.selected_archs.append(self.config.potential_archs[best_global])
-            self.config.selected_embs.append(X[best_global])
-            self.config.selected_accs.append(accs[best_global])
-            self.config.selected_indices.append(best_global)
+            self.config.selected_archs.append(self.config.potential_archs[chosen])
+            self.config.selected_embs.append(X[chosen])
+            self.config.selected_accs.append(accs[chosen])
+            self.config.selected_indices.append(chosen)
 
-
-    
     def paint_tsne(self, X, centroids, cluster_ids):
         # 2-step reduction: PCA -> 50d, then t-SNE -> 2d
         pca50 = PCA(n_components=50, random_state=self.config.seed)
