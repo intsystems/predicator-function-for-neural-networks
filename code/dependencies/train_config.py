@@ -46,7 +46,8 @@ class TrainConfig:
     random_choice_out_of_best: bool
 
     n_epochs_final: int
-    lr_final: float
+    lr_start_final: float
+    lr_end_final: float
     batch_size_final: int
     dataset_name: str
     final_dataset_path: str

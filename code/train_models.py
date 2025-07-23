@@ -210,6 +210,7 @@ class DiversityNESRunner:
                     auxiliary_loss_weight=0.4,
                     max_epochs=self.config.n_epochs_final,
                     num_classes=self.num_classes,
+                    lr_final=self.config.lr_end_final
                 ),
                 trainer=Trainer(
                     gradient_clip_val=5.0,

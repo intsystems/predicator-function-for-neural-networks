@@ -52,6 +52,8 @@ Using this function, we develop an efficient NES framework that enables the sele
     "developer_mode": true, // Режим разработчика (в нем модели обучаются лишь на одном батче)
 }
 ```
+Логи всех модулей сохраняются в папку logs.
+
 ## 1. train_models.py
 Скрипт для обучения ансамбля моделей и оценки их качества.
 
@@ -67,11 +69,12 @@ Using this function, we develop an efficient NES framework that enables the sele
     "n_models_to_evaluate": 100,        // Количество моделей для генерации, если подготавливаем датасет, иначе ни на что не влияет
     "evaluate_ensemble_flag": false,     // Флаг оценки ансамбля (true/false). Если true, то оцениваем ансамбль, если false, то подготавливаем датасет
     "prepared_dataset_path": "datasets/evaluated_dataset/", // По этому пути лежит подготовленный датасет
-    "best_models_save_path": "best_models/", // Путь к архитектурам моделей, из которых состоит ансамбля
+    "best_models_save_path": "best_models/", // Путь к архитектурам моделей, из которых составляется ансамбль
     "dataset_name": "CIFAR10",           // Используемый датасет (CIFAR10/CIFAR100/FashionMNIST)
     "final_dataset_path": "datasets/final_dataset/", // Путь к папке, куда будем скачивать датасеты для обучения моделей
     "n_epochs_final": 1,                 // Количество эпох обучения
-    "lr_final": 0.025,                   // Скорость обучения
+    "lr_start_final": 0.025,             // Начальный шаг обучения
+    "lr_end_final": 1e-3,                // Конечный шаг обучения
     "batch_size_final": 96,              // Размер батча
     "width": 4,                          // Ширина слоев в DARTS
     "num_cells": 3,                      // Количество ячеек в DARTS
@@ -112,15 +115,15 @@ Using this function, we develop an efficient NES framework that enables the sele
     "lower_margin": 0.25,                // Нижний квантиль для дискретизации матрицы похожести
     "input_dim": 8,                      // Размерность признаков
     "acc_num_epochs": 10,                // Количество эпох обучения модели точности
-    "acc_lr": 1e-2,                      // LR для модели точности
+    "acc_lr_start": 1e-2,                // Начальный шаг обучения для модели точности
+    "acc_lr_end": 1e-5,                  // Конечный шаг обучения для модели точности
     "acc_dropout": 0.2,                  // Dropout для модели точности
     "acc_n_heads": 16,                   // Количество голов в модели точности
-    "acc_final_lr": 1e-5,                // eta_min для Cosine scheduler
     "div_num_epochs": 5,                 // Количество эпох обучения модели разнообразия
-    "div_lr": 1e-3,                      // LR для модели разнообразия
+    "div_lr_start": 1e-3,                // Начальный шаг обучения для модели разнообразия
+    "div_lr_end": 1e-6,                  // eta_min для Cosine scheduler
     "div_dropout": 0.1,                  // Dropout для модели разнообразия
     "div_n_heads": 4,                    // Количество голов в модели разнообразия
-    "div_final_lr": 1e-6,                // eta_min для Cosine scheduler
     "margin": 1,                         // Отступ для triplet loss
     "div_output_dim": 128,               // Размерность эмбеддинга разнообразия
     "surrogate_inference_path": "surrogate_models/", // Путь для сохранения моделей
