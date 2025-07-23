@@ -22,7 +22,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class DeepEnsBaseline(DiversityNESRunner):
+class DartsBaseline(DiversityNESRunner):
     def __init__(self, config: TrainConfig):
         super().__init__(config)
 
@@ -110,7 +110,7 @@ if __name__ == "__main__":
     params.update({"device": "cuda:0" if torch.cuda.is_available() else "cpu"})
     config = TrainConfig(**params)
 
-    config.evaluate_ensemble_flag = False #need for get validation loader\
-    runner = DeepEnsBaseline(config)
+    config.evaluate_ensemble_flag = False # DARTS needs validation loader
+    runner = DartsBaseline(config)
     runner.run()
     

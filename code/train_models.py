@@ -158,6 +158,13 @@ class DiversityNESRunner:
         )
 
         return train_loader, valid_loader, test_loader
+    
+    @staticmethod
+    def _custom_weight_init(module):
+        if isinstance(module, torch.nn.Linear) or isinstance(module, torch.nn.Conv2d):
+            torch.nn.init.xavier_uniform_(module.weight)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
 
     def train_model(
         self,
@@ -165,7 +172,8 @@ class DiversityNESRunner:
         train_loader: DataLoader,
         valid_loader: DataLoader,
         model_id: int,
-        save_dir_name = "trained_models"
+        save_dir_name = "trained_models",
+        weight_init_seed = None
     ) -> torch.nn.Module:
         """
         Train a single model defined by architecture and return the trained model.
@@ -186,7 +194,10 @@ class DiversityNESRunner:
                     num_cells=self.config.num_cells,
                     dataset=dataset,
                 )
-
+            
+            if weight_init_seed:
+                torch.manual_seed(weight_init_seed)
+                model.apply(self._custom_weight_init)
             model.to(self.device)
 
             devices_arg = 1 if self.device.type == "cuda" else "auto"
