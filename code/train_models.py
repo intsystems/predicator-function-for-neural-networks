@@ -278,6 +278,9 @@ class DiversityNESRunner:
                 valid_correct += (predicted == labels).sum().item()
                 valid_total += labels.size(0)
 
+                if self.config.developer_mode:
+                    break
+
         valid_accuracy = valid_correct / valid_total
 
         # Формирование результата
