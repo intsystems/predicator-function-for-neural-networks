@@ -56,7 +56,7 @@ class RandomSearchBaseline(DiversityNESRunner):
                 valid_loader,
                 self.config.tmp_archs_path,
             )
-            self.models = []    # Doesn't need to save models in prepare dataset mode
+            self.models = []    # Don't need to save all models
 
         shutil.rmtree(Path(self.config.output_path) / "RandomSearch_tmp")
         self.config.n_epochs_final = n_epoch_final
