@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import logging
 from pathlib import Path
 
@@ -11,55 +12,57 @@ from nni.nas.evaluator.pytorch import Lightning, Trainer
 from pytorch_lightning.loggers import TensorBoardLogger
 
 from dependencies.train_config import TrainConfig
+from train_models import DiversityNESRunner
 from dependencies.darts_classification_module import DartsClassificationModule
 from utils_nni.DartsSpace import DARTS_with_CIFAR100 as DartsSpace
-from DARTS_baseline import DartsBaseline
+from dependencies.data_generator import generate_arch_dicts
 
 from tqdm import tqdm
 
-# Setup logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+NUM_PRETRAIN_EPOCHS = 5
 
 
-class DeepEnsBaseline(DartsBaseline):
+class RandomSearchBaseline(DiversityNESRunner):
     def __init__(self, config: TrainConfig):
         super().__init__(config)
+
+        self.pretrain_epochs = NUM_PRETRAIN_EPOCHS
 
     def run(self):
         self.config.selected_archs = []
 
         train_loader, valid_loader, test_loader = self.get_data_loaders()
-        self.config.selected_archs.append(
-            self.get_best_models(train_loader, valid_loader)
-        )
-        self.config.selected_archs = (
-            self.config.selected_archs * self.config.n_ensemble_models
-        )
+        archs = generate_arch_dicts(self.config.n_models_to_generate)
 
-        for idx, arch in enumerate(
-            tqdm(self.config.selected_archs, desc="Training models")
-        ):
-            print(f"\nTraining model {idx+1}/{len(self.config.selected_archs)}")
-            self.train_model(
+        shutil.rmtree(Path(self.config.tmp_archs_path), ignore_errors=True)
+        Path(self.config.tmp_archs_path).mkdir(parents=True, exist_ok=True)
+
+        n_epoch_final = self.config.n_epochs_final
+        self.config.n_epochs_final = self.pretrain_epochs
+        for idx, arch in enumerate(tqdm(archs, desc="Training models")):
+            print(f"\nTraining model {idx+1}/{len(archs)}")
+            model = self.train_model(
                 arch,
                 train_loader,
                 valid_loader,
                 idx,
-                save_dir_name="DeepEns_baseline_models",
-                weight_init_seed = self.config.seed + idx * 10
+                save_dir_name=f"RandomSearch_tmp",
+                weight_init_seed=None,
             )
+            self.evaluate_and_save_results(
+                model,
+                arch,
+                valid_loader,
+                self.config.tmp_archs_path,
+            )
+            self.models = []    # Doesn't need to save models in prepare dataset mode
 
-        print("\nEvaluating ensemble...")
-        stats = self.collect_ensemble_stats(test_loader)
-        self.finalize_ensemble_evaluation(stats, "DeepEns_baseline_results")
-
-        print("\nAll models processed successfully!")
-        print(f"Выбрано и сохранено {len(self.config.selected_archs)} моделей.")
+        shutil.rmtree(Path(self.config.output_path) / "RandomSearch_tmp")
+        self.config.n_epochs_final = n_epoch_final
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="DeepEns NAS Runner")
+    parser = argparse.ArgumentParser(description="RandomSearch NAS Runner")
     parser.add_argument(
         "--hyperparameters_json",
         type=str,
@@ -73,5 +76,5 @@ if __name__ == "__main__":
     config = TrainConfig(**params)
 
     config.evaluate_ensemble_flag = False  # DARTS needs validation loader
-    runner = DeepEnsBaseline(config)
+    runner = RandomSearchBaseline(config)
     runner.run()
