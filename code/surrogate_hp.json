@@ -36,9 +36,12 @@
     "n_models_to_generate": 1000,
     "batch_size_inference": 1000,
     "min_accuracy_for_pool": 0.1,
+    "acc_distance_gamma":0.3,
+    "min_acc_and_div_to_ensemble":1.47,
     "best_models_save_path": "best_models/",
     "tmp_archs_path": "datasets/tmp_archs/",
-    "random_choice_out_of_best" : true,
+    "random_choice_out_of_best" : false,
+    "greedy_choice_out_of_best" : false,
 
     "n_epochs_final": 1,
     "lr_start_final": 0.025,

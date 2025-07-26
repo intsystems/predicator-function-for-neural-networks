@@ -16,6 +16,7 @@ from sklearn.metrics import silhouette_samples, silhouette_score
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
 from pathlib import Path
+from scipy.spatial.distance import cdist
 
 import torch
 import gc
@@ -29,8 +30,7 @@ import sys
 sys.path.insert(1, "../dependencies")
 
 from dependencies.GCN import GAT, CustomDataset, collate_graphs, extract_embeddings
-from dependencies.Graph import Graph
-from dependencies.data_generator import generate_arch_dicts
+from dependencies.data_generator import generate_arch_dicts, mutate_architectures
 from dependencies.train_config import TrainConfig
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -84,48 +84,18 @@ class InferSurrogate:
 
     def architecture_search(self):
         tmp_dir = Path(self.config.tmp_archs_path)
-        shutil.rmtree(tmp_dir, ignore_errors=True)
-        tmp_dir.mkdir(parents=True, exist_ok=True)
 
-        # 1) Сгенерировать архитектуры
         arch_dicts = generate_arch_dicts(
             self.config.n_models_to_generate, use_tqdm=True
         )
 
-        # 2) Сохраняем как JSON-файлы
-        arch_paths = []
-        for i, arch in enumerate(arch_dicts):
-            path = tmp_dir / f"arch_{len(os.listdir(tmp_dir)) + i}.json"
-            with path.open("w", encoding="utf-8") as f:
-                json.dump(arch, f)
-            arch_paths.append(path)
+        arch_paths, emb_acc_np, emb_div_np = self._get_embeddings(tmp_dir, arch_dicts)
 
-        # 3) Датасет и DataLoader
-        dataset = CustomDataset(arch_paths, use_tqdm=True)
-        loader = DataLoader(
-            dataset,
-            batch_size=self.config.batch_size_inference,
-            shuffle=False,
-            num_workers=self.config.num_workers,
-            collate_fn=collate_graphs,
-        )
-
-        # 4) Извлечь эмбеддинги
-        with torch.no_grad():
-            emb_acc_np, _ = extract_embeddings(
-                self.config.model_accuracy, loader, device, use_tqdm=True
-            )
-            emb_div_np, _ = extract_embeddings(
-                self.config.model_diversity, loader, device, use_tqdm=True
-            )
-
-        # 5) Фильтрация по точности
         mask = emb_acc_np >= self.config.min_accuracy_for_pool
         valid_paths = [p for p, ok in zip(arch_paths, mask) if ok]
         valid_div_embs = emb_div_np[mask].astype(np.float16)
         valid_accs = emb_acc_np[mask]
 
-        # 6) Добавляем в пул
         for path, emb, acc in zip(valid_paths, valid_div_embs, valid_accs):
             arch = json.loads(path.read_text(encoding="utf-8"))
             self.config.potential_archs.append(arch)
@@ -136,29 +106,11 @@ class InferSurrogate:
         gc.collect()
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
-    def select_central_models_by_clusters(self):
-        """
-        Кластеризует potential_embeddings на K кластеров,
-        и из каждого выбирает модель, ближайшую к центроиду.
+    def select_central_models_by_clusters(self, n_near_centroid=1):
 
-        Если plot_tsne=True, сначала уменьшает размерность эмбеддингов
-        до 50 с помощью PCA, затем проецирует вместе с центроидами
-        на плоскость t-SNE и рисует результат.
-
-        Возвращает:
-            selected_archs: список выбранных архитектур (K штук)
-            selected_embs: соответствующие эмбеддинги
-            selected_accs: соответствующие точности
-        """
-        # Приводим к numpy
         X = np.array(self.config.potential_embeddings, dtype=np.float32)
         accs = np.array(self.config.potential_accuracies, dtype=np.float32)
 
-        # if len(X) > self.config.n_models_in_pool:
-        #     X = X[:self.config.n_models_in_pool]
-        #     accs = accs[:self.config.n_models_in_pool]
-
-        # 1. Кластеризация на оригинальных эмбеддингах
         kmeans = KMeans(
             n_clusters=self.config.n_ensemble_models,
             random_state=self.config.seed,
@@ -166,6 +118,11 @@ class InferSurrogate:
         )
         cluster_ids = kmeans.fit_predict(X)
         centroids = kmeans.cluster_centers_
+
+        self.config.selected_archs = []
+        self.config.selected_embs = []
+        self.config.selected_accs = []
+        self.config.selected_indices = []
 
         for cluster_id in range(self.config.n_ensemble_models):
             idxs = np.where(cluster_ids == cluster_id)[0]
@@ -176,13 +133,17 @@ class InferSurrogate:
             centroid = centroids[cluster_id]
 
             dists = np.linalg.norm(cluster_X - centroid, axis=1)
-            local_best = np.argmin(dists)
-            best_global = idxs[local_best]
+            sorted_local = np.argsort(dists)[:n_near_centroid]
 
-            self.config.selected_archs.append(self.config.potential_archs[best_global])
-            self.config.selected_embs.append(X[best_global])
-            self.config.selected_accs.append(accs[best_global])
-            self.config.selected_indices.append(best_global)
+            for local_best in sorted_local:
+                best_global = idxs[local_best]
+
+                self.config.selected_archs.append(
+                    self.config.potential_archs[best_global]
+                )
+                self.config.selected_embs.append(X[best_global])
+                self.config.selected_accs.append(accs[best_global])
+                self.config.selected_indices.append(best_global)
 
         self.paint_tsne(X, centroids, cluster_ids)
 
@@ -197,9 +158,172 @@ class InferSurrogate:
             self.config.selected_accs.append(accs[chosen])
             self.config.selected_indices.append(chosen)
 
+    def _clear_buffers(self, potential=True, seleceted=True):
+        if potential:
+            self.config.potential_archs = []
+            self.config.potential_embeddings = []
+            self.config.potential_accuracies = []
+        if seleceted:
+            self.config.selected_archs = []
+            self.config.selected_embs = []
+            self.config.selected_accs = []
+            self.config.selected_indices = []
+
+    def _get_embeddings(self, path_dir, archs):
+        shutil.rmtree(path_dir, ignore_errors=True)
+        path_dir.mkdir(parents=True, exist_ok=True)
+
+        arch_paths = []
+        for i, arch in enumerate(archs):
+            path = path_dir / f"arch_{len(os.listdir(path_dir)) + i}.json"
+            with path.open("w", encoding="utf-8") as f:
+                json.dump(arch, f)
+            arch_paths.append(path)
+
+        dataset = CustomDataset(arch_paths, use_tqdm=True)
+        loader = DataLoader(
+            dataset,
+            batch_size=self.config.batch_size_inference,
+            shuffle=False,
+            num_workers=self.config.num_workers,
+            collate_fn=collate_graphs,
+        )
+
+        with torch.no_grad():
+            emb_acc_np, _ = extract_embeddings(
+                self.config.model_accuracy, loader, device, use_tqdm=True
+            )
+            emb_div_np, _ = extract_embeddings(
+                self.config.model_diversity, loader, device, use_tqdm=True
+            )
+
+        return arch_paths, emb_acc_np, emb_div_np
+
+    def _select_top_diverse_models(self, acc_embs, div_embs):
+        n_models = len(acc_embs)
+        n_keep = self.config.n_ensemble_models
+
+        acc_embs = np.array(acc_embs)
+        div_embs = np.array(div_embs)
+
+        selected_idxs = [np.argmax(acc_embs)]
+        remaining_idxs = list(set(range(n_models)) - set(selected_idxs))
+
+        scores = [0.0]
+
+        while len(selected_idxs) < n_keep:
+            best_score = -np.inf
+            best_idx = None
+
+            for idx in remaining_idxs:
+                distances = cdist(
+                    div_embs[[idx]], div_embs[selected_idxs], metric="euclidean"
+                )[0]
+                mean_dist = distances.mean()
+                score = acc_embs[idx] + self.config.acc_distance_gamma * mean_dist
+
+                if score > best_score:
+                    best_score = score
+                    best_idx = idx
+
+            selected_idxs.append(best_idx)
+            scores.append(best_score)
+            remaining_idxs.remove(best_idx)
+
+        first_idx = selected_idxs[0]
+        other_div_embs = div_embs[selected_idxs[1:]]
+        first_distances = cdist(
+            div_embs[[first_idx]], other_div_embs, metric="euclidean"
+        )[0]
+        first_score = (
+            acc_embs[first_idx]
+            + self.config.acc_distance_gamma * first_distances.mean()
+        )
+        scores[0] = first_score
+
+        self.config.selected_archs = [
+            self.config.selected_archs[i] for i in selected_idxs
+        ]
+        self.config.selected_embs = [
+            self.config.selected_embs[i] for i in selected_idxs
+        ]
+        self.config.selected_accs = [
+            self.config.selected_accs[i] for i in selected_idxs
+        ]
+        self.config.selected_indices = [
+            self.config.selected_indices[i] for i in selected_idxs
+        ]
+
+        return scores
+
+    def greedy_choice_out_of_best(self):
+        tmp_dir = Path(self.config.tmp_archs_path)
+
+        ensemble_list = []
+        tmp_archs = generate_arch_dicts(self.config.n_models_in_pool)
+        while len(ensemble_list) < self.config.n_ensemble_models:
+            self._clear_buffers()
+
+            arch_paths, emb_acc_np, emb_div_np = self._get_embeddings(
+                tmp_dir, tmp_archs
+            )
+
+            mask = emb_acc_np >= self.config.min_accuracy_for_pool
+            valid_paths = [p for p, ok in zip(arch_paths, mask) if ok]
+            emb_div_np = emb_div_np[mask]
+            emb_acc_np = emb_acc_np[mask]
+
+            for path, emb, acc in zip(valid_paths, emb_div_np, emb_acc_np):
+                arch = json.loads(path.read_text(encoding="utf-8"))
+                self.config.potential_archs.append(arch)
+                self.config.potential_embeddings.append(emb)
+                self.config.potential_accuracies.append(acc)
+
+            if len(ensemble_list) == 0:
+                self.select_central_models_by_clusters()
+                best_model = self.config.selected_archs[0]
+                ensemble_list.append(best_model)
+            else:
+                self.select_central_models_by_clusters(n_near_centroid=10)
+
+                _, emb_acc_np, emb_div_np = self._get_embeddings(
+                    tmp_dir, self.config.selected_archs
+                )
+
+                if len(emb_acc_np) == 0:  # if no models are above min_accuracy_for_pool
+                    tmp_archs = mutate_architectures(
+                        tmp_archs,
+                        n_mutations=4,
+                        n_out_models=self.config.n_models_to_generate,
+                    )
+                    continue
+
+                scores = self._select_top_diverse_models(emb_acc_np, emb_div_np)
+
+                for idx, score in enumerate(scores):
+                    if score >= self.config.min_acc_and_div_to_ensemble:
+                        print(
+                            f"Adding model {len(ensemble_list) + 1}/{self.config.n_ensemble_models} with score = {score:.2f}"
+                        )
+                        ensemble_list.append(self.config.selected_archs[idx])
+                        if len(ensemble_list) >= self.config.n_ensemble_models:
+                            break
+
+            tmp_archs = mutate_architectures(
+                ensemble_list,
+                n_mutations=4,
+                n_out_models=self.config.n_models_to_generate,
+            )
+
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        self.config.selected_archs = ensemble_list
+
     def paint_tsne(self, X, centroids, cluster_ids):
         # 2-step reduction: PCA -> 50d, then t-SNE -> 2d
-        pca50 = PCA(n_components=50, random_state=self.config.seed)
+        pca50 = PCA(
+            n_components=min(50, X.shape[0], X.shape[1]),
+            random_state=self.config.seed,
+        )
         X50 = pca50.fit_transform(X)
         C50 = pca50.transform(centroids)
 
@@ -271,9 +395,12 @@ if __name__ == "__main__":
 
     inference = InferSurrogate(config)
     inference.initialize_models()
-    inference.architecture_search()
     if config.random_choice_out_of_best:
+        inference.architecture_search()
         inference.random_choice_out_of_best()
+    elif config.greedy_choice_out_of_best:
+        inference.greedy_choice_out_of_best()
     else:
+        inference.architecture_search()
         inference.select_central_models_by_clusters()
     inference.save_models()
