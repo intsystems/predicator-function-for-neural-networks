@@ -201,7 +201,7 @@ class InferSurrogate:
 
     def _select_top_diverse_models(self, acc_embs, div_embs):
         n_models = len(acc_embs)
-        n_keep = self.config.n_ensemble_models
+        n_keep = min(self.config.n_ensemble_models * 20, len(acc_embs))
 
         acc_embs = np.array(acc_embs)
         div_embs = np.array(div_embs)
@@ -296,6 +296,7 @@ class InferSurrogate:
                         n_mutations=4,
                         n_out_models=self.config.n_models_to_generate,
                     )
+                    tmp_archs.extend(ensemble_list)
                     continue
 
                 scores = self._select_top_diverse_models(emb_acc_np, emb_div_np)
@@ -314,6 +315,7 @@ class InferSurrogate:
                 n_mutations=4,
                 n_out_models=self.config.n_models_to_generate,
             )
+            tmp_archs.extend(ensemble_list)
 
         shutil.rmtree(tmp_dir, ignore_errors=True)
         self.config.selected_archs = ensemble_list
