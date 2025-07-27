@@ -10,7 +10,8 @@ class DartsClassificationModule(ClassificationModule):
         weight_decay: float = 0.,
         auxiliary_loss_weight: float = 0.4,
         max_epochs: int = 600,
-        num_classes: int = 10
+        num_classes: int = 10,
+        lr_final: float = 1e-3
     ):
         self.auxiliary_loss_weight = auxiliary_loss_weight
         # Training length will be used in LR scheduler

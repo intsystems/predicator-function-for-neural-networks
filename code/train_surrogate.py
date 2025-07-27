@@ -46,8 +46,8 @@ class SurrogateTrainer:
 
     def load_dataset(self) -> None:
         self.config.models_dict_path = []
-        for i, file_path in enumerate(
-            tqdm(self.dataset_path.rglob("*.json"), desc="Loading dataset")
+        for file_path in tqdm(
+            self.dataset_path.rglob("*.json"), desc="Loading dataset"
         ):
             self.config.models_dict_path.append(file_path)
 
@@ -99,11 +99,16 @@ class SurrogateTrainer:
 
         plt.figure(figsize=(10, 6))
 
-        plt.hist(diversities, bins=50, edgecolor="black", weights=np.ones(len(diversities)) / len(diversities))
+        plt.hist(
+            diversities,
+            bins=50,
+            edgecolor="black",
+            weights=np.ones(len(diversities)) / len(diversities),
+        )
         # plt.title("Distribution of Model Diversity")
         plt.xlabel("Percentage of Differences", fontsize=18)
         plt.ylabel("Percentage", fontsize=18)
-        plt.grid(axis='y', linestyle='--', alpha=0.7)
+        plt.grid(axis="y", linestyle="--", alpha=0.7)
         plt.xticks(fontsize=16)
         plt.yticks(fontsize=16)
         plt.savefig("logs/diversities.png")
@@ -135,10 +140,16 @@ class SurrogateTrainer:
         os.makedirs("logs/", exist_ok=True)
         plt.figure(figsize=(10, 6))
 
-        plt.hist(accs, bins=50, edgecolor='black', color="green", weights=[1/len(accs)]*len(accs))
+        plt.hist(
+            accs,
+            bins=50,
+            edgecolor="black",
+            color="green",
+            weights=[1 / len(accs)] * len(accs),
+        )
         # plt.title('Distribution of Model Accuracies')
-        plt.xlabel('Accuracy', fontsize=18)
-        plt.ylabel('Percentage', fontsize=18)
+        plt.xlabel("Accuracy", fontsize=18)
+        plt.ylabel("Percentage", fontsize=18)
         plt.xticks(fontsize=16)
         plt.yticks(fontsize=16)
         plt.savefig("logs/accuracies.png")

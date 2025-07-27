@@ -1,5 +1,4 @@
 import json
-import shutil
 import os
 import logging
 from pathlib import Path
@@ -23,7 +22,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class DeepEnsBaseline(DiversityNESRunner):
+class DartsBaseline(DiversityNESRunner):
     def __init__(self, config: TrainConfig):
         super().__init__(config)
 
@@ -81,8 +80,7 @@ class DeepEnsBaseline(DiversityNESRunner):
 
     def run(self):
         self.config.selected_archs = []
-        shutil.rmtree(self.config.output_path, ignore_errors=True)
-
+        
         for idx, _ in enumerate(tqdm(range(self.config.n_ensemble_models), desc="Finding best architectures")):
             train_loader, valid_loader, test_loader = self.get_data_loaders(seed=self.config.seed + idx * 10)
             self.config.selected_archs.append(self.get_best_models(train_loader, valid_loader))
@@ -93,7 +91,7 @@ class DeepEnsBaseline(DiversityNESRunner):
 
         print("\nEvaluating ensemble...")
         stats = self.collect_ensemble_stats(test_loader)
-        self.finalize_ensemble_evaluation(stats, "DARTS_baseline_results.txt")
+        self.finalize_ensemble_evaluation(stats, "DARTS_baseline_results")
 
         print("\nAll models processed successfully!")
         print(f"Выбрано и сохранено {len(self.config.selected_archs)} моделей.")
@@ -112,7 +110,7 @@ if __name__ == "__main__":
     params.update({"device": "cuda:0" if torch.cuda.is_available() else "cpu"})
     config = TrainConfig(**params)
 
-    config.evaluate_ensemble_flag = False #need for get validation loader\
-    runner = DeepEnsBaseline(config)
+    config.evaluate_ensemble_flag = False # DARTS needs validation loader
+    runner = DartsBaseline(config)
     runner.run()
     

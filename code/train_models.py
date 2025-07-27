@@ -158,6 +158,13 @@ class DiversityNESRunner:
         )
 
         return train_loader, valid_loader, test_loader
+    
+    @staticmethod
+    def _custom_weight_init(module):
+        if isinstance(module, torch.nn.Linear) or isinstance(module, torch.nn.Conv2d):
+            torch.nn.init.xavier_uniform_(module.weight)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
 
     def train_model(
         self,
@@ -165,7 +172,8 @@ class DiversityNESRunner:
         train_loader: DataLoader,
         valid_loader: DataLoader,
         model_id: int,
-        save_dir_name = "trained_models"
+        save_dir_name = "trained_models",
+        weight_init_seed = None
     ) -> torch.nn.Module:
         """
         Train a single model defined by architecture and return the trained model.
@@ -186,7 +194,10 @@ class DiversityNESRunner:
                     num_cells=self.config.num_cells,
                     dataset=dataset,
                 )
-
+            
+            if weight_init_seed:
+                torch.manual_seed(weight_init_seed)
+                model.apply(self._custom_weight_init)
             model.to(self.device)
 
             devices_arg = 1 if self.device.type == "cuda" else "auto"
@@ -194,11 +205,12 @@ class DiversityNESRunner:
 
             evaluator = Lightning(
                 DartsClassificationModule(
-                    learning_rate=self.config.lr_final,
+                    learning_rate=self.config.lr_start_final,
                     weight_decay=3e-4,
                     auxiliary_loss_weight=0.4,
                     max_epochs=self.config.n_epochs_final,
                     num_classes=self.num_classes,
+                    lr_final=self.config.lr_end_final
                 ),
                 trainer=Trainer(
                     gradient_clip_val=5.0,
@@ -265,6 +277,9 @@ class DiversityNESRunner:
                 _, predicted = torch.max(outputs, 1)
                 valid_correct += (predicted == labels).sum().item()
                 valid_total += labels.size(0)
+
+                if self.config.developer_mode:
+                    break
 
         valid_accuracy = valid_correct / valid_total
 
@@ -359,8 +374,13 @@ class DiversityNESRunner:
             "num_models": len(valid_models),
         }
 
+    def _get_free_file_index(self, path: Path, file_name="ensembles_results"):
+        experiment_num = 0
+        while os.path.exists(path +  f'/{file_name}_{experiment_num}.txt'):
+            experiment_num += 1
+        return experiment_num
 
-    def finalize_ensemble_evaluation(self, stats):
+    def finalize_ensemble_evaluation(self, stats, file_name="ensembles_results"):
         if stats is None:
             return None, None, None
 
@@ -393,10 +413,8 @@ class DiversityNESRunner:
 
         # Save to file
         os.makedirs(self.config.output_path, exist_ok=True)
-        experiment_num = 0
-        while os.path.exists(os.path.join(self.config.output_path, f'ensembles_results_{experiment_num}.txt')):
-            experiment_num += 1
-        out_file = os.path.join(self.config.output_path, f'ensembles_results_{experiment_num}.txt')
+        experiment_num = self._get_free_file_index(self.config.output_path, file_name)
+        out_file = os.path.join(self.config.output_path, f'{file_name}_{experiment_num}.txt')
         with open(out_file, "w") as f:
             f.write(f"Ensemble Top-1 Accuracy: {ensemble_acc:.2f}%\n")
             f.write(f"Ensemble ECE: {ece:.4f}\n")
@@ -447,7 +465,7 @@ class DiversityNESRunner:
         if self.config.evaluate_ensemble_flag:
             print("\nEvaluating ensemble...")
             stats = self.collect_ensemble_stats(test_loader)
-            self.finalize_ensemble_evaluation(stats)
+            self.finalize_ensemble_evaluation(stats, "ensemble_results")
 
         print("\nAll models processed successfully!")
 

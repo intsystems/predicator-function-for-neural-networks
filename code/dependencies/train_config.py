@@ -36,6 +36,8 @@ class TrainConfig:
     n_models_to_generate: int
     batch_size_inference: int
     min_accuracy_for_pool: float
+    acc_distance_gamma:float
+    min_acc_and_div_to_ensemble:float
     
     tmp_archs_path: str
     best_models_save_path: str
@@ -44,9 +46,11 @@ class TrainConfig:
     evaluate_ensemble_flag: bool
 
     random_choice_out_of_best: bool
+    greedy_choice_out_of_best: bool
 
     n_epochs_final: int
-    lr_final: float
+    lr_start_final: float
+    lr_end_final: float
     batch_size_final: int
     dataset_name: str
     final_dataset_path: str
