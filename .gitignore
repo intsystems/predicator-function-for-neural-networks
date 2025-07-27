@@ -19,7 +19,7 @@ code/for_kaggle.sh
 *lightning_logs*
 code/logs
 code/surrogate_models
-code/output
+code/output*
 
 *.zip
 

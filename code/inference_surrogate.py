@@ -235,10 +235,10 @@ class InferSurrogate:
 
         for i in range(self.config.n_ensemble_models):
             chosen = np.random.randint(X.shape[0])
-            self.config.selected_archs.append(self.config.potential_archs[best_global])
-            self.config.selected_embs.append(X[best_global])
-            self.config.selected_accs.append(accs[best_global])
-            self.config.selected_indices.append(best_global)
+            self.config.selected_archs.append(self.config.potential_archs[chosen])
+            self.config.selected_embs.append(X[chosen])
+            self.config.selected_accs.append(accs[chosen])
+            self.config.selected_indices.append(chosen)
 
 
     

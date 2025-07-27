@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CONFIG="surrogate_hp.json"
+CONFIG="surrogate_hp_our.json"
 
 # python train_surrogate.py --hyperparameters_json "$CONFIG"
 
