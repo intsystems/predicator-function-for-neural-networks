@@ -41,10 +41,9 @@
     "best_models_save_path": "best_models/",
     "tmp_archs_path": "datasets/tmp_archs/",
     "random_choice_out_of_best" : false,
-    "greedy_choice_out_of_best" : false,
+    "greedy_choice_out_of_best" : true,
 
     "n_epochs_final": 100,
-    "lr_final": 0.025,
     "n_epochs_final": 1,
     "lr_start_final": 0.025,
     "lr_end_final": 1e-3,
@@ -55,7 +54,7 @@
     "evaluate_ensemble_flag": true,
     "n_models_to_evaluate":100,
     "prepared_dataset_path": "datasets/evaluated_dataset/",
-    "output_path": "output_random/",
+    "output_path": "output_greed/",
     "width": 16,
     "num_cells": 10,
     "n_ece_bins": 15
