@@ -44,7 +44,6 @@
     "greedy_choice_out_of_best" : true,
 
     "n_epochs_final": 100,
-    "n_epochs_final": 1,
     "lr_start_final": 0.025,
     "lr_end_final": 1e-3,
     "batch_size_final": 96,
