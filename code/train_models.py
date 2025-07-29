@@ -76,7 +76,9 @@ class DiversityNESRunner:
             config.device if torch.cuda.is_available() else "cpu"
         )
 
-    def get_data_loaders(self, batch_size: int = None, seed=None) -> Tuple[DataLoader, DataLoader, DataLoader]:
+    def get_data_loaders(
+        self, batch_size: int = None, seed=None
+    ) -> Tuple[DataLoader, DataLoader, DataLoader]:
         """
         Create training and validation data loaders for the chosen dataset.
         """
@@ -158,7 +160,7 @@ class DiversityNESRunner:
         )
 
         return train_loader, valid_loader, test_loader
-    
+
     @staticmethod
     def _custom_weight_init(module):
         if isinstance(module, torch.nn.Linear) or isinstance(module, torch.nn.Conv2d):
@@ -172,8 +174,8 @@ class DiversityNESRunner:
         train_loader: DataLoader,
         valid_loader: DataLoader,
         model_id: int,
-        save_dir_name = "trained_models",
-        weight_init_seed = None
+        save_dir_name="trained_models",
+        weight_init_seed=None,
     ) -> torch.nn.Module:
         """
         Train a single model defined by architecture and return the trained model.
@@ -194,7 +196,7 @@ class DiversityNESRunner:
                     num_cells=self.config.num_cells,
                     dataset=dataset,
                 )
-            
+
             if weight_init_seed:
                 torch.manual_seed(weight_init_seed)
                 model.apply(self._custom_weight_init)
@@ -210,7 +212,7 @@ class DiversityNESRunner:
                     auxiliary_loss_weight=0.4,
                     max_epochs=self.config.n_epochs_final,
                     num_classes=self.num_classes,
-                    lr_final=self.config.lr_end_final
+                    lr_final=self.config.lr_end_final,
                 ),
                 trainer=Trainer(
                     gradient_clip_val=5.0,
@@ -291,7 +293,7 @@ class DiversityNESRunner:
         }
 
         # Генерация имени файла с использованием model_id
-        file_name = f"model_{self.model_id:04d}_results.json"
+        file_name = f"model_{self.model_id:4d}_results.json"
         file_path = os.path.join(folder_name, file_name)
 
         # Сохранение результатов
@@ -376,7 +378,7 @@ class DiversityNESRunner:
 
     def _get_free_file_index(self, path: Path, file_name="ensembles_results"):
         experiment_num = 0
-        while os.path.exists(path +  f'/{file_name}_{experiment_num}.txt'):
+        while os.path.exists(path + f"/{file_name}_{experiment_num}.txt"):
             experiment_num += 1
         return experiment_num
 
@@ -414,7 +416,9 @@ class DiversityNESRunner:
         # Save to file
         os.makedirs(self.config.output_path, exist_ok=True)
         experiment_num = self._get_free_file_index(self.config.output_path, file_name)
-        out_file = os.path.join(self.config.output_path, f'{file_name}_{experiment_num}.txt')
+        out_file = os.path.join(
+            self.config.output_path, f"{file_name}_{experiment_num}.txt"
+        )
         with open(out_file, "w") as f:
             f.write(f"Ensemble Top-1 Accuracy: {ensemble_acc:.2f}%\n")
             f.write(f"Ensemble ECE: {ece:.4f}\n")
@@ -450,17 +454,14 @@ class DiversityNESRunner:
         print(f"Starting training for {len(arch_dicts)} models...")
         archs = [d["architecture"] for d in arch_dicts]
 
-        if not self.config.evaluate_ensemble_flag:
-            shutil.rmtree(self.config.prepared_dataset_path, ignore_errors=True)
-
         for idx, arch in enumerate(tqdm(archs, desc="Training models")):
             print(f"\nTraining model {idx+1}/{len(archs)}")
             model = self.train_model(arch, train_loader, valid_loader, idx)
+            self.evaluate_and_save_results(
+                model, arch, valid_loader, self.config.output_path + "/trained_models_archs/"
+            )
             if not self.config.evaluate_ensemble_flag:
-                self.evaluate_and_save_results(
-                    model, arch, valid_loader, self.config.prepared_dataset_path
-                )
-                self.models = []    # Doesn't need to save models in prepare dataset mode
+                self.models = []  # Doesn't need to save models in prepare dataset mode
 
         if self.config.evaluate_ensemble_flag:
             print("\nEvaluating ensemble...")

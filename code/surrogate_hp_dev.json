@@ -50,8 +50,8 @@
     "dataset_name": "CIFAR10",
 
     "final_dataset_path": "datasets/final_dataset/",
-    "evaluate_ensemble_flag": true,
-    "n_models_to_evaluate":100,
+    "evaluate_ensemble_flag": false,
+    "n_models_to_evaluate":5,
     "prepared_dataset_path": "datasets/evaluated_dataset/",
     "output_path": "output/",
     "width": 16,
