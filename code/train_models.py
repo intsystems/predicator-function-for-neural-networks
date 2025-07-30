@@ -293,7 +293,7 @@ class DiversityNESRunner:
         }
 
         # Генерация имени файла с использованием model_id
-        file_name = f"model_{self.model_id:4d}_results.json"
+        file_name = f"model_{self.model_id:d}_results.json"
         file_path = os.path.join(folder_name, file_name)
 
         # Сохранение результатов
