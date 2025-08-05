@@ -6,6 +6,8 @@ import json
 import argparse
 import shutil
 from pathlib import Path
+import gc
+import random
 
 from torch_geometric.utils import dense_to_sparse
 import matplotlib.pyplot as plt
@@ -15,14 +17,7 @@ from sklearn.cluster import OPTICS, DBSCAN, KMeans
 from sklearn.metrics import silhouette_samples, silhouette_score
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
-from pathlib import Path
 from scipy.spatial.distance import cdist
-
-import torch
-import gc
-from torch.utils.data import DataLoader
-from collections import deque
-import shutil
 
 # Custom imports
 import sys
@@ -34,8 +29,6 @@ from dependencies.data_generator import generate_arch_dicts, mutate_architecture
 from dependencies.train_config import TrainConfig
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-TEST = False
-
 
 class InferSurrogate:
     def __init__(self, config) -> None:
@@ -106,6 +99,32 @@ class InferSurrogate:
         gc.collect()
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
+    def select_models_only_score(self, n_dist_calc=10):
+        models_with_scores = []
+
+        for idx, (arch, emb, acc) in enumerate(tqdm(zip(
+            self.config.potential_archs,
+            self.config.potential_embeddings,
+            self.config.potential_accuracies,
+        ), desc="Calculating scores")):
+            neighbors = np.array(random.choices(
+                self.config.potential_embeddings,
+                k=n_dist_calc,
+            ))
+            dist = np.mean(np.linalg.norm(neighbors - emb, axis=1))
+            score = acc + self.config.acc_distance_gamma * dist
+
+            models_with_scores.append((arch, emb, acc, idx, score))
+
+        models_with_scores.sort(key=lambda x: x[4], reverse=True)
+
+        for i in range(self.config.n_ensemble_models):
+            self.config.selected_archs.append(models_with_scores[i][0])
+            self.config.selected_embs.append(models_with_scores[i][1])
+            self.config.selected_accs.append(models_with_scores[i][2])
+            self.config.selected_indices.append(models_with_scores[i][3])
+            print(f"Adding model {i+1}/{self.config.n_ensemble_models} with score = {models_with_scores[i][4]:.2f}, accuracy = {models_with_scores[i][2]:.2f}")
+
     def select_central_models_by_clusters(self, n_near_centroid=1):
 
         X = np.array(self.config.potential_embeddings, dtype=np.float32)
@@ -157,6 +176,7 @@ class InferSurrogate:
             self.config.selected_embs.append(X[chosen])
             self.config.selected_accs.append(accs[chosen])
             self.config.selected_indices.append(chosen)
+
     def _clear_buffers(self, potential=True, seleceted=True):
         if potential:
             self.config.potential_archs = []
@@ -401,6 +421,9 @@ if __name__ == "__main__":
         inference.random_choice_out_of_best()
     elif config.greedy_choice_out_of_best:
         inference.greedy_choice_out_of_best()
+    elif config.no_clusters_choice:
+        inference.architecture_search()
+        inference.select_models_only_score()
     else:
         inference.architecture_search()
         inference.select_central_models_by_clusters()

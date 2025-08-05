@@ -220,9 +220,8 @@ class GAT(nn.Module):
         out = F.leaky_relu(out)
         out = self.fc2(out)
         if self.output_dim == 1:
-            out = torch.sigmoid(out)
-        return out
-
+            return torch.sigmoid(out)
+        return F.normalize(out, p=2, dim=-1)
 
 class CustomDataset(Dataset):
     @staticmethod

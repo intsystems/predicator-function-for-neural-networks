@@ -47,6 +47,7 @@ class TrainConfig:
 
     random_choice_out_of_best: bool
     greedy_choice_out_of_best: bool
+    no_clusters_choice: bool
 
     n_epochs_final: int
     lr_start_final: float

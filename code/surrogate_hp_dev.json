@@ -3,9 +3,9 @@
     "num_workers": 4,
     "dataset_path": "datasets/third_dataset",
     "device": "cuda",
-    "developer_mode": true,
+    "developer_mode": false,
 
-    "n_models": 300,
+    "n_models": 1300,
 
     "upper_margin": 0.75,
     "lower_margin": 0.25,
@@ -15,7 +15,7 @@
     "batch_size": 8,
     "input_dim":8,
 
-    "acc_num_epochs": 10,
+    "acc_num_epochs": 1,
     "acc_lr_start": 1e-2,
     "acc_lr_end": 1e-3,
     "acc_dropout": 0.2,
@@ -33,15 +33,16 @@
 
     "n_ensemble_models": 4,
     "n_models_in_pool": 256,
-    "n_models_to_generate": 300,
+    "n_models_to_generate": 30000,
     "batch_size_inference": 1000,
-    "min_accuracy_for_pool": 0.1,
+    "min_accuracy_for_pool": 0.871,
     "acc_distance_gamma":0.3,
     "min_acc_and_div_to_ensemble":1.47,
     "best_models_save_path": "best_models/",
     "tmp_archs_path": "datasets/tmp_archs/",
     "random_choice_out_of_best" : false,
-    "greedy_choice_out_of_best" : true,
+    "greedy_choice_out_of_best" : false,
+    "no_clusters_choice": true,
 
     "n_epochs_final": 200,
     "lr_start_final": 0.025,
