@@ -147,32 +147,33 @@ class GCN(nn.Module):
         return x
 
 
+class GATBlock(nn.Module):
+    def __init__(self, in_dim, out_dim, heads=1, dropout=0.5):
+        super().__init__()
+        self.gat = GATv2Conv(in_dim, out_dim // heads, heads=heads)
+        self.res_proj = nn.Linear(in_dim, out_dim)
+        self.norm = GraphNorm(out_dim)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x, edge_index):
+        h = self.gat(x, edge_index)
+        h = F.leaky_relu(h + self.res_proj(x))
+        h = self.norm(h)
+        h = self.dropout(h)
+        return h
+
+
 class GAT(nn.Module):
     def __init__(self, input_dim, output_dim=16, dropout=0.5, pooling="max", heads=4):
-        super(GAT, self).__init__()
-
-        self.input_dim = input_dim
-        self.output_dim = output_dim
+        super().__init__()
         self.hidden_dim = 64
-        self.heads = heads
+        self.output_dim = output_dim
 
-        self.gat1 = GATv2Conv(input_dim, self.hidden_dim // heads, heads=heads)
-        self.gat2 = GATv2Conv(self.hidden_dim, 256 // heads, heads=heads)
-        self.gat3 = GATv2Conv(256, 256 // heads, heads=heads)
-        self.gat4 = GATv2Conv(256, self.hidden_dim // heads, heads=heads)
+        self.block1 = GATBlock(input_dim, self.hidden_dim, heads=heads, dropout=dropout)
+        self.block2 = GATBlock(self.hidden_dim, 256, heads=heads, dropout=dropout)
+        self.block3 = GATBlock(256, 256, heads=heads, dropout=dropout)
+        self.block4 = GATBlock(256, self.hidden_dim, heads=heads, dropout=dropout)
 
-        # residual projection
-        self.res1 = nn.Linear(input_dim, self.hidden_dim)
-        self.res2 = nn.Linear(self.hidden_dim, 256)
-        self.res3 = nn.Linear(256, 256)
-        self.res4 = nn.Linear(256, self.hidden_dim)
-
-        self.norm1 = GraphNorm(self.hidden_dim)
-        self.norm2 = GraphNorm(256)
-        self.norm3 = GraphNorm(256)
-        self.norm4 = GraphNorm(self.hidden_dim)
-
-        self.dropout = nn.Dropout(dropout)
         self.pooling = pooling
 
         self.fc1 = nn.Linear(self.hidden_dim, self.hidden_dim)
@@ -180,29 +181,10 @@ class GAT(nn.Module):
         self.fc2 = nn.Linear(self.hidden_dim, output_dim)
 
     def forward(self, x, edge_index, batch=None):
-        # Layer 1
-        h1 = self.gat1(x, edge_index)
-        h1 = F.leaky_relu(h1 + self.res1(x))
-        h1 = self.norm1(h1)
-        h1 = self.dropout(h1)
-
-        # Layer 2
-        h2 = self.gat2(h1, edge_index)
-        h2 = F.leaky_relu(h2 + self.res2(h1))
-        h2 = self.norm2(h2)
-        h2 = self.dropout(h2)
-
-        # Layer 3
-        h3 = self.gat3(h2, edge_index)
-        h3 = F.leaky_relu(h3 + self.res3(h2))
-        h3 = self.norm3(h3)
-        h3 = self.dropout(h3)
-
-        # Layer 4
-        h4 = self.gat4(h3, edge_index)
-        h4 = F.leaky_relu(h4 + self.res4(h3))
-        h4 = self.norm4(h4)
-        h4 = self.dropout(h4)
+        h1 = self.block1(x, edge_index)
+        h2 = self.block2(h1, edge_index)
+        h3 = self.block3(h2, edge_index)
+        h4 = self.block4(h3, edge_index)
 
         # Global pooling
         if self.pooling == "max":
@@ -219,6 +201,7 @@ class GAT(nn.Module):
         out = self.fc_norm(out)
         out = F.leaky_relu(out)
         out = self.fc2(out)
+
         if self.output_dim == 1:
             return torch.sigmoid(out)
         return F.normalize(out, p=2, dim=-1)
@@ -437,7 +420,6 @@ def train_model_diversity(
     plot_train_valid_losses(train_losses, valid_losses, file_name="diversity_model.png")
 
     return train_losses, valid_losses
-
 
 def train_model_accuracy(
     model,

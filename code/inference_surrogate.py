@@ -25,10 +25,11 @@ import sys
 sys.path.insert(1, "../dependencies")
 
 from dependencies.GCN import GAT, CustomDataset, collate_graphs, extract_embeddings
-from dependencies.data_generator import generate_arch_dicts, mutate_architectures
+from dependencies.data_generator import generate_arch_dicts, mutate_architectures, load_dataset
 from dependencies.train_config import TrainConfig
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 class InferSurrogate:
     def __init__(self, config) -> None:
@@ -78,9 +79,18 @@ class InferSurrogate:
     def architecture_search(self):
         tmp_dir = Path(self.config.tmp_archs_path)
 
-        arch_dicts = generate_arch_dicts(
-            self.config.n_models_to_generate, use_tqdm=True
-        )
+        if self.config.developer_mode:
+            load_dataset(self.config)
+            arch_dicts = []
+            for arch_json in self.config.models_dict_path:
+                arch = json.loads(arch_json.read_text(encoding="utf-8"))
+                arch.pop("test_predictions")
+                arch.pop("test_accuracy")
+                arch_dicts.append(arch)
+        else:
+            arch_dicts = generate_arch_dicts(
+                self.config.n_models_to_generate, use_tqdm=True
+            )
 
         arch_paths, emb_acc_np, emb_div_np = self._get_embeddings(tmp_dir, arch_dicts)
 
@@ -102,15 +112,22 @@ class InferSurrogate:
     def select_models_only_score(self, n_dist_calc=10):
         models_with_scores = []
 
-        for idx, (arch, emb, acc) in enumerate(tqdm(zip(
-            self.config.potential_archs,
-            self.config.potential_embeddings,
-            self.config.potential_accuracies,
-        ), desc="Calculating scores")):
-            neighbors = np.array(random.choices(
-                self.config.potential_embeddings,
-                k=n_dist_calc,
-            ))
+        for idx, (arch, emb, acc) in enumerate(
+            tqdm(
+                zip(
+                    self.config.potential_archs,
+                    self.config.potential_embeddings,
+                    self.config.potential_accuracies,
+                ),
+                desc="Calculating scores",
+            )
+        ):
+            neighbors = np.array(
+                random.choices(
+                    self.config.potential_embeddings,
+                    k=n_dist_calc,
+                )
+            )
             dist = np.mean(np.linalg.norm(neighbors - emb, axis=1))
             score = acc + self.config.acc_distance_gamma * dist
 
@@ -123,7 +140,9 @@ class InferSurrogate:
             self.config.selected_embs.append(models_with_scores[i][1])
             self.config.selected_accs.append(models_with_scores[i][2])
             self.config.selected_indices.append(models_with_scores[i][3])
-            print(f"Adding model {i+1}/{self.config.n_ensemble_models} with score = {models_with_scores[i][4]:.2f}, accuracy = {models_with_scores[i][2]:.2f}")
+            print(
+                f"Adding model {i+1}/{self.config.n_ensemble_models} with score = {models_with_scores[i][4]:.2f}, accuracy = {models_with_scores[i][2]:.2f}"
+            )
 
     def select_central_models_by_clusters(self, n_near_centroid=1):
 

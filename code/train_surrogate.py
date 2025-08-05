@@ -21,7 +21,7 @@ import sys
 
 sys.path.insert(1, "../dependencies")
 
-from dependencies.Graph import Graph
+from dependencies.data_generator import load_dataset
 from dependencies.train_config import TrainConfig
 from dependencies.GCN import (
     GAT,
@@ -43,22 +43,6 @@ class SurrogateTrainer:
         self.config = config
         self.device = torch.device(config.device)
         self.dataset_path = Path(config.dataset_path)
-
-    def load_dataset(self) -> None:
-        self.config.models_dict_path = []
-        for file_path in tqdm(
-            self.dataset_path.rglob("*.json"), desc="Loading dataset"
-        ):
-            self.config.models_dict_path.append(file_path)
-
-        if len(self.config.models_dict_path) < self.config.n_models:
-            raise ValueError(
-                f"Only {len(self.config.models_dict_path)} model paths found, but n_models={self.config.n_models}"
-            )
-
-        self.config.models_dict_path = random.sample(
-            self.config.models_dict_path, self.config.n_models
-        )
 
     def _prepare_predictions(self, num_samples: Optional[int] = None):
         preds = []
@@ -239,6 +223,7 @@ class SurrogateTrainer:
             dropout=self.config.div_dropout,
             heads=self.config.div_n_heads,
         )
+        
         opt = torch.optim.AdamW(
             self.config.model_diversity.parameters(), lr=self.config.div_lr_start
         )
@@ -279,7 +264,7 @@ if __name__ == "__main__":
 
     trainer = SurrogateTrainer(config)
     print("Loading models")
-    trainer.load_dataset()
+    load_dataset(config)
     print("Getting diversuty matrix")
     trainer.get_diversity_matrix()
     print("Creating discrete diversity matrix")
