@@ -457,11 +457,15 @@ class DiversityNESRunner:
         for idx, arch in enumerate(tqdm(archs, desc="Training models")):
             print(f"\nTraining model {idx+1}/{len(archs)}")
             model = self.train_model(arch, train_loader, valid_loader, idx)
-            self.evaluate_and_save_results(
-                model, arch, valid_loader, self.config.output_path + "/trained_models_archs/"
-            )
+            
             if not self.config.evaluate_ensemble_flag:
                 self.models = []  # Doesn't need to save models in prepare dataset mode
+                self.evaluate_and_save_results(
+                    model,
+                    arch,
+                    valid_loader,
+                    self.config.output_path + "/trained_models_archs/",
+                )
 
         if self.config.evaluate_ensemble_flag:
             print("\nEvaluating ensemble...")
