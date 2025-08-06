@@ -174,7 +174,7 @@ class DiversityNESRunner:
         train_loader: DataLoader,
         valid_loader: DataLoader,
         model_id: int,
-        save_dir_name="trained_models",
+        save_dir_name="trained_models_pth",
         weight_init_seed=None,
     ) -> torch.nn.Module:
         """

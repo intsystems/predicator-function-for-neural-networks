@@ -8,6 +8,7 @@ import shutil
 from pathlib import Path
 import gc
 import random
+import re
 
 from torch_geometric.utils import dense_to_sparse
 import matplotlib.pyplot as plt
@@ -15,6 +16,7 @@ from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 from sklearn.cluster import OPTICS, DBSCAN, KMeans
 from sklearn.metrics import silhouette_samples, silhouette_score
+from nni.nas.space import model_context
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
 from scipy.spatial.distance import cdist
@@ -25,7 +27,7 @@ import sys
 sys.path.insert(1, "../dependencies")
 
 from dependencies.GCN import GAT, CustomDataset, collate_graphs, extract_embeddings
-from dependencies.data_generator import generate_arch_dicts, mutate_architectures, load_dataset
+from dependencies.data_generator import generate_arch_dicts, mutate_architectures, load_dataset_on_inference
 from dependencies.train_config import TrainConfig
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -80,12 +82,13 @@ class InferSurrogate:
         tmp_dir = Path(self.config.tmp_archs_path)
 
         if self.config.developer_mode:
-            load_dataset(self.config)
+            load_dataset_on_inference(self.config)
             arch_dicts = []
             for arch_json in self.config.models_dict_path:
                 arch = json.loads(arch_json.read_text(encoding="utf-8"))
-                arch.pop("test_predictions")
-                arch.pop("test_accuracy")
+                for key in ("test_predictions", "test_accuracy"):
+                    arch.pop(key, None)
+                arch["id"] = int(re.search(r'model_(\d+)', str(arch_json)).group(1))
                 arch_dicts.append(arch)
         else:
             arch_dicts = generate_arch_dicts(
@@ -411,18 +414,22 @@ class InferSurrogate:
         plt.close()
 
     def save_models(self):
-        shutil.rmtree(self.config.best_models_save_path, ignore_errors=True)
-        os.makedirs(self.config.best_models_save_path, exist_ok=True)
+        save_path = Path(self.config.best_models_save_path)
+        if save_path.exists():
+            shutil.rmtree(save_path)
 
-        # Сохраняем архитектуры по одной
         for i, arch in enumerate(self.config.selected_archs, 1):
-            file_path = os.path.join(
-                self.config.best_models_save_path, f"model_{i:02d}.json"
-            )
-            with open(file_path, "w") as f:
-                json.dump(arch, f, indent=4)
-            print(f"Сохранена модель {i} в {file_path}")
+            os.makedirs(save_path / "models_json", exist_ok=True)
+            file_path = save_path / "models_json" / f"model_{i:d}.json"
+            file_path.write_text(json.dumps(arch, indent=4), encoding="utf-8")
 
+            print(f"Saved model {i} in {file_path}")
+            if arch.get("id") is not None:
+                os.makedirs(save_path / "models_pth", exist_ok=True)
+                id = arch["id"]
+                src = Path(self.config.prepared_dataset_path.replace("archs", "pth")) / f"model_{id:d}.pth"
+                dst = save_path / "models_pth" / f"model_{i:d}.pth"
+                shutil.copy(src, dst)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Surrogate inference")

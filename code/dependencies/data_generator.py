@@ -64,7 +64,7 @@ def mutate_architectures(
 
     mutated = []
     for arch_entry in arch_list:
-        arch = copy.deepcopy(arch_entry['architecture'])
+        arch = copy.deepcopy(arch_entry["architecture"])
         op_keys = [k for k in arch.keys() if k.startswith(("normal/op_", "reduce/op_"))]
         n = min(n_mutations, len(op_keys))
         mutate_keys = random.sample(op_keys, k=n)
@@ -77,13 +77,12 @@ def mutate_architectures(
 
     return mutated
 
+
 def load_dataset(config) -> None:
     config.dataset_path = Path(config.dataset_path)
 
     config.models_dict_path = []
-    for file_path in tqdm(
-        config.dataset_path.rglob("*.json"), desc="Loading dataset"
-    ):
+    for file_path in tqdm(config.dataset_path.rglob("*.json"), desc="Loading dataset"):
         config.models_dict_path.append(file_path)
 
     if len(config.models_dict_path) < config.n_models:
@@ -91,6 +90,12 @@ def load_dataset(config) -> None:
             f"Only {len(config.models_dict_path)} model paths found, but n_models={config.n_models}"
         )
 
-    config.models_dict_path = random.sample(
-        config.models_dict_path, config.n_models
-    )
+    config.models_dict_path = random.sample(config.models_dict_path, config.n_models)
+
+
+def load_dataset_on_inference(config) -> None:
+    config.dataset_path = Path(config.prepared_dataset_path)
+
+    config.models_dict_path = []
+    for file_path in tqdm(config.dataset_path.rglob("*.json"), desc="Loading dataset"):
+        config.models_dict_path.append(file_path)
