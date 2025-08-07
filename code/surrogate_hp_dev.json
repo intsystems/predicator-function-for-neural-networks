@@ -31,7 +31,7 @@
 
     "surrogate_inference_path": "surrogate_models/",
 
-    "use_pretrained_models_for_ensemble": true,
+    "use_pretrained_models_for_ensemble": false,
     "n_ensemble_models": 4,
     "n_models_in_pool": 256,
     "n_models_to_generate": 300,
@@ -44,7 +44,7 @@
     "prepared_dataset_path": "output/trained_models_archs/",
     "random_choice_out_of_best" : false,
     "greedy_choice_out_of_best" : false,
-    "no_clusters_choice": true,
+    "no_clusters_choice": false,
 
 
     "n_epochs_final": 200,

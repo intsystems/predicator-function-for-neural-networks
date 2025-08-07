@@ -429,6 +429,27 @@ class DiversityNESRunner:
 
         print(f"Results saved to {out_file}")
         return ensemble_acc, model_accs, ece
+    
+    def get_latest_index_from_dir(self, base_path: Path = None) -> int:
+        """
+        Находит максимальный индекс среди директорий models_json_*
+        """
+        if base_path is None:
+            base_path = Path(self.config.best_models_save_path)
+
+        candidates = [p for p in base_path.glob("models_json_*") if p.is_dir()]
+        if not candidates:
+            raise FileNotFoundError(f"No models_json_* directories found in {base_path}")
+
+        indices = [
+            int(m.group(1)) for p in candidates
+            if (m := re.search(r"models_json_(\d+)", str(p)))
+        ]
+
+        if not indices:
+            raise ValueError("No valid indices found in models_json_* directories")
+
+        return max(indices)
 
     def run(self):
         """
@@ -438,10 +459,11 @@ class DiversityNESRunner:
             raise FileNotFoundError(
                 f"Architecture directory {self.config.best_models_save_path} not found"
             )
-
-        if self.config.evaluate_ensemble_flag:  #loading best models to evaluate ensemble
+        if self.config.evaluate_ensemble_flag:
             print("Loading architecture definitions...")
-            arch_dicts = load_json_from_directory(self.config.best_models_save_path)
+            latest_index = self.get_latest_index_from_dir(Path(self.config.best_models_save_path))
+            models_json_dir = Path(self.config.best_models_save_path) / f"models_json_{latest_index}" #loading best models to evaluate ensemble
+            arch_dicts = load_json_from_directory(models_json_dir)
             if not arch_dicts:
                 raise RuntimeError(
                     "No valid architectures found in the specified directory"
@@ -483,26 +505,19 @@ class DiversityNESRunner:
         root_dir = Path(self.config.best_models_save_path)
         if not root_dir.exists():
             raise FileNotFoundError(f"Directory {root_dir} not found")
-
-        # Сканируем доступные json директории
-        json_dirs = [p for p in root_dir.glob("models_json_*") if p.is_dir()]
-        if not json_dirs:
-            raise FileNotFoundError("No models_json_* directories found.")
-
-        # Извлекаем и сортируем индексы
-        indices = [
-            self._extract_index(p)
-            for p in json_dirs
-            if self._extract_index(p) is not None
-        ]
-        indices = sorted(indices)
+        last_index = self.get_latest_index_from_dir(root_dir)
 
         if self.config.developer_mode:
-            for idx in indices:
-                self.run_pretrained(idx)
-                self.models = []
+            for idx in range(1, last_index + 1):
+                json_dir = root_dir / f"models_json_{idx}"
+                pth_dir = root_dir / f"models_pth_{idx}"
+                if json_dir.exists() and pth_dir.exists():
+                    self.run_pretrained(idx)
+                    self.models = []
+                else:
+                    print(f"Skipping index {idx}: missing json or pth directory.")
         else:
-            self.run_pretrained(indices[-1])
+            self.run_pretrained(last_index)
 
     def _extract_index(self, path):
         match = re.search(r"models_json_(\d+)", str(path))
