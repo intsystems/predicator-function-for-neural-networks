@@ -27,7 +27,11 @@ import sys
 sys.path.insert(1, "../dependencies")
 
 from dependencies.GCN import GAT, CustomDataset, collate_graphs, extract_embeddings
-from dependencies.data_generator import generate_arch_dicts, mutate_architectures, load_dataset_on_inference
+from dependencies.data_generator import (
+    generate_arch_dicts,
+    mutate_architectures,
+    load_dataset_on_inference,
+)
 from dependencies.train_config import TrainConfig
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -81,14 +85,14 @@ class InferSurrogate:
     def architecture_search(self):
         tmp_dir = Path(self.config.tmp_archs_path)
 
-        if self.config.developer_mode:
+        if self.config.use_pretrained_models_for_ensemble:
             load_dataset_on_inference(self.config)
             arch_dicts = []
             for arch_json in self.config.models_dict_path:
                 arch = json.loads(arch_json.read_text(encoding="utf-8"))
                 for key in ("test_predictions", "test_accuracy"):
                     arch.pop(key, None)
-                arch["id"] = int(re.search(r'model_(\d+)', str(arch_json)).group(1))
+                arch["id"] = int(re.search(r"model_(\d+)", str(arch_json)).group(1))
                 arch_dicts.append(arch)
         else:
             arch_dicts = generate_arch_dicts(
@@ -414,22 +418,43 @@ class InferSurrogate:
         plt.close()
 
     def save_models(self):
-        save_path = Path(self.config.best_models_save_path)
-        if save_path.exists():
-            shutil.rmtree(save_path)
+        base_save_path = Path(self.config.best_models_save_path)
+        base_save_path.mkdir(parents=True, exist_ok=True)
+
+        # Найти следующий доступный индекс
+        existing_json_dirs = [
+            p for p in base_save_path.glob("models_json_*") if p.is_dir()
+        ]
+        indices = [
+            int(re.search(r"models_json_(\d+)", str(p)).group(1))
+            for p in existing_json_dirs
+            if re.search(r"models_json_(\d+)", str(p))
+        ]
+        next_index = max(indices, default=0) + 1
+
+        # Создание новых папок с новым индексом
+        models_json_dir = base_save_path / f"models_json_{next_index}"
+        models_pth_dir = base_save_path / f"models_pth_{next_index}"
+        models_json_dir.mkdir(parents=True, exist_ok=False)
+        models_pth_dir.mkdir(parents=True, exist_ok=False)
 
         for i, arch in enumerate(self.config.selected_archs, 1):
-            os.makedirs(save_path / "models_json", exist_ok=True)
-            file_path = save_path / "models_json" / f"model_{i:d}.json"
-            file_path.write_text(json.dumps(arch, indent=4), encoding="utf-8")
-
-            print(f"Saved model {i} in {file_path}")
             if arch.get("id") is not None:
-                os.makedirs(save_path / "models_pth", exist_ok=True)
-                id = arch["id"]
-                src = Path(self.config.prepared_dataset_path.replace("archs", "pth")) / f"model_{id:d}.pth"
-                dst = save_path / "models_pth" / f"model_{i:d}.pth"
+                model_id = arch["id"]
+                file_path = models_json_dir / f"model_{model_id:d}.json"
+                file_path.write_text(json.dumps(arch, indent=4), encoding="utf-8")
+                print(f"Saved model {i} in {file_path}")
+                
+                src = (
+                    Path(self.config.prepared_dataset_path.replace("archs", "pth"))
+                    / f"model_{model_id:d}.pth"
+                )
+                dst = models_pth_dir / f"model_{model_id:d}.pth"
                 shutil.copy(src, dst)
+            else:
+                file_path = models_json_dir / f"model_{i:d}.json"
+                file_path.write_text(json.dumps(arch, indent=4), encoding="utf-8")
+                print(f"Saved model {i} in {file_path}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Surrogate inference")

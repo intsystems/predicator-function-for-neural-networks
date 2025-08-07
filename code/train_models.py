@@ -1,6 +1,7 @@
 import os
 import json
 import shutil
+import re
 import argparse
 from pathlib import Path
 import random
@@ -41,36 +42,51 @@ def load_json_from_directory(directory_path: str) -> List[dict]:
                         print(f"Error decoding JSON from {file_path}: {e}")
     return json_data
 
+DATASETS_INFO = {
+    "cifar10": {
+        "key": "cifar",
+        "class": CIFAR10,
+        "num_classes": 10,
+        "mean": [0.4914, 0.4822, 0.4465],
+        "std": [0.2470, 0.2435, 0.2616],
+        "img_size": 32,
+        "transform": [],
+    },
+    "cifar100": {
+        "key": "cifar100",
+        "class": CIFAR100,
+        "num_classes": 100,
+        "mean": [0.5071, 0.4867, 0.4408],
+        "std": [0.2673, 0.2564, 0.2762],
+        "img_size": 32,
+        "transform": [],
+    },
+    "fashionmnist": {
+        "key": "cifar",  # судя по твоей логике
+        "class": FashionMNIST,
+        "num_classes": 10,
+        "mean": [0.2860406],
+        "std": [0.35302424],
+        "img_size": 32,
+        "transform": [transforms.Resize(32)],
+    },
+}
 
 class DiversityNESRunner:
-    def __init__(self, config: TrainConfig):
+    def __init__(self, config: TrainConfig, info: DATASETS_INFO):
         self.config = config
         self.models = []
         self.model_id = 0
+        self.dataset_key = info["key"]
+        self.dataset_cls = info["class"]
+        self.num_classes = info["num_classes"]
+        self.MEAN = info["mean"]
+        self.STD = info["std"]
+        self.img_size = info["img_size"]
+        self.base_transform = info["transform"]
 
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
-
-        # Determine dataset specifics
-        if config.dataset_name.lower() == "cifar10":
-            self.MEAN = [0.4914, 0.4822, 0.4465]
-            self.STD = [0.2470, 0.2435, 0.2616]
-            self.img_size = 32
-            self.base_transform = []
-        elif config.dataset_name.lower() == "cifar100":
-            self.MEAN = [0.5071, 0.4867, 0.4408]
-            self.STD = [0.2673, 0.2564, 0.2762]
-            self.img_size = 32
-            self.base_transform = []
-        elif config.dataset_name.lower() == "fashionmnist":
-            self.MEAN = [0.2860406]
-            self.STD = [0.35302424]
-            self.img_size = 32
-            self.base_transform = [
-                transforms.Resize(32),
-            ]
-        else:
-            raise ValueError(f"Unknown dataset: {config.dataset_name}")
 
         self.device = torch.device(
             config.device if torch.cuda.is_available() else "cpu"
@@ -101,15 +117,8 @@ class DiversityNESRunner:
             ]
         )
 
-        if self.config.dataset_name.lower() == "cifar10":
-            dataset_cls = CIFAR10
-            self.num_classes = 10
-        elif self.config.dataset_name.lower() == "cifar100":
-            dataset_cls = CIFAR100
-            self.num_classes = 100
-        elif self.config.dataset_name.lower() == "fashionmnist":
-            dataset_cls = FashionMNIST
-            self.num_classes = 10
+        dataset_cls = self.dataset_cls
+        self.num_classes = self.num_classes
 
         train_data = nni.trace(dataset_cls)(
             root=self.config.final_dataset_path,
@@ -181,15 +190,7 @@ class DiversityNESRunner:
         Train a single model defined by architecture and return the trained model.
         """
         try:
-            if self.config.dataset_name.lower() == "cifar10":
-                dataset = "cifar"
-            elif self.config.dataset_name.lower() == "cifar100":
-                dataset = "cifar100"
-            elif self.config.dataset_name.lower() == "fashionmnist":
-                dataset = "cifar"
-            else:
-                raise ValueError(f"Unknown dataset: {self.config.dataset_name}")
-
+            dataset = self.dataset_key
             with model_context(architecture):
                 model = DartsSpace(
                     width=self.config.width,
@@ -438,7 +439,7 @@ class DiversityNESRunner:
                 f"Architecture directory {self.config.best_models_save_path} not found"
             )
 
-        if self.config.evaluate_ensemble_flag:
+        if self.config.evaluate_ensemble_flag:  #loading best models to evaluate ensemble
             print("Loading architecture definitions...")
             arch_dicts = load_json_from_directory(self.config.best_models_save_path)
             if not arch_dicts:
@@ -446,10 +447,10 @@ class DiversityNESRunner:
                     "No valid architectures found in the specified directory"
                 )
         else:
-            arch_dicts = generate_arch_dicts(self.config.n_models_to_evaluate)
+            arch_dicts = generate_arch_dicts(self.config.n_models_to_evaluate) #generating dataset of models for surrogate
 
         print("Creating data loaders...")
-        train_loader, valid_loader, test_loader = self.get_data_loaders()
+        train_loader, valid_loader, test_loader = self.get_data_loaders() # if evaluating ensemble, then val_loader is None
 
         print(f"Starting training for {len(arch_dicts)} models...")
         archs = [d["architecture"] for d in arch_dicts]
@@ -474,6 +475,92 @@ class DiversityNESRunner:
 
         print("\nAll models processed successfully!")
 
+    def run_all_pretrained(self):
+        """
+        Wrapper over run_pretrained(index) that determines whether to evaluate all saved models
+        or just the latest one based on config.evaluate_all_pretrained_models.
+        """
+        root_dir = Path(self.config.best_models_save_path)
+        if not root_dir.exists():
+            raise FileNotFoundError(f"Directory {root_dir} not found")
+
+        # Сканируем доступные json директории
+        json_dirs = [p for p in root_dir.glob("models_json_*") if p.is_dir()]
+        if not json_dirs:
+            raise FileNotFoundError("No models_json_* directories found.")
+
+        # Извлекаем и сортируем индексы
+        indices = [
+            self._extract_index(p)
+            for p in json_dirs
+            if self._extract_index(p) is not None
+        ]
+        indices = sorted(indices)
+
+        if self.config.developer_mode:
+            for idx in indices:
+                self.run_pretrained(idx)
+                self.models = []
+        else:
+            self.run_pretrained(indices[-1])
+
+    def _extract_index(self, path):
+        match = re.search(r"models_json_(\d+)", str(path))
+        return int(match.group(1)) if match else -1
+
+    def run_pretrained(self, index: int):
+        """
+        Load pretrained models and evaluate them without further training
+        using models_json_{index} and models_pth_{index}.
+        """
+        root_dir = Path(self.config.best_models_save_path)
+        json_dir = root_dir / f"models_json_{index}"
+        pth_dir = root_dir / f"models_pth_{index}"
+
+        if not json_dir.exists():
+            raise FileNotFoundError(f"Directory {json_dir} not found")
+        if not pth_dir.exists():
+            raise FileNotFoundError(f"Directory {pth_dir} not found")
+
+        print(f"\nUsing models_json from: {json_dir}")
+        print(f"Using models_pth from: {pth_dir}")
+
+        arch_dicts = load_json_from_directory(json_dir)
+        if not arch_dicts:
+            raise RuntimeError(f"No valid architectures found in {json_dir}")
+
+        _, valid_loader, test_loader = self.get_data_loaders()
+
+        print(f"Loading and evaluating {len(arch_dicts)} pretrained models...")
+        for idx, arch_entry in enumerate(tqdm(arch_dicts, desc=f"Evaluating models in index {index}")):
+            arch = arch_entry["architecture"]
+            model_id = arch_entry.get("id")
+            if model_id is None:
+                raise ValueError(f"Architecture entry {idx} has no 'id' field")
+
+            dataset = self.dataset_key
+            with model_context(arch):
+                model = DartsSpace(
+                    width=self.config.width,
+                    num_cells=self.config.num_cells,
+                    dataset=dataset,
+                )
+
+            model.to(self.device)
+
+            model_path = pth_dir / f"model_{model_id}.pth"
+            if not model_path.exists():
+                raise FileNotFoundError(f"Model weights not found at {model_path}")
+            model.load_state_dict(torch.load(model_path, map_location=self.device))
+            self.models.append(model)
+
+        if self.config.evaluate_ensemble_flag:
+            print(f"\nEvaluating ensemble at index {index}...")
+            stats = self.collect_ensemble_stats(test_loader)
+            self.finalize_ensemble_evaluation(stats, f"ensemble_results_{index}")
+
+        print(f"\nAll pretrained models from index {index} evaluated successfully!")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="DARTS NAS Runner")
@@ -488,7 +575,11 @@ if __name__ == "__main__":
     # Load hyperparameters from JSON and set device automatically
     params = json.loads(Path(args.hyperparameters_json).read_text())
     params.update({"device": "cuda:0" if torch.cuda.is_available() else "cpu"})
+    
     config = TrainConfig(**params)
-
-    runner = DiversityNESRunner(config)
-    runner.run()
+    info = DATASETS_INFO[config.dataset_name.lower()]
+    runner = DiversityNESRunner(config, info)
+    if config.use_pretrained_models_for_ensemble:
+        runner.run_all_pretrained()
+    else:
+        runner.run()

@@ -31,6 +31,7 @@ class TrainConfig:
     surrogate_inference_path: str
     input_dim: int
 
+    use_pretrained_models_for_ensemble: bool
     n_ensemble_models: int
     n_models_in_pool: int
     n_models_to_generate: int
