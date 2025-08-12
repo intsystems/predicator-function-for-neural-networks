@@ -88,9 +88,9 @@ class InferSurrogate:
         if self.config.use_pretrained_models_for_ensemble:
             load_dataset_on_inference(self.config)
             arch_dicts = []
-            for arch_json in self.config.models_dict_path:
+            for arch_json in tqdm(self.config.models_dict_path, desc="Deleting keys"):
                 arch = json.loads(arch_json.read_text(encoding="utf-8"))
-                for key in ("test_predictions", "test_accuracy"):
+                for key in ("test_predictions", "test_accuracy", "valid_predictions", "valid_accuracy"):
                     arch.pop(key, None)
                 arch["id"] = int(re.search(r"model_(\d+)", str(arch_json)).group(1))
                 arch_dicts.append(arch)
@@ -467,6 +467,7 @@ if __name__ == "__main__":
 
     inference = InferSurrogate(config)
     inference.initialize_models()
+
     if config.random_choice_out_of_best:
         inference.architecture_search()
         inference.random_choice_out_of_best()

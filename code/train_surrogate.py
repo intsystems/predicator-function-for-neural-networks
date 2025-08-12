@@ -46,7 +46,7 @@ class SurrogateTrainer:
 
     def _prepare_predictions(self, num_samples: Optional[int] = None):
         preds = []
-        for path in self.config.models_dict_path:
+        for path in tqdm(self.config.models_dict_path, desc="Preparing predictions"):
             with path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
             prediction_name = (
@@ -265,7 +265,7 @@ if __name__ == "__main__":
     trainer = SurrogateTrainer(config)
     print("Loading models")
     load_dataset(config)
-    print("Getting diversuty matrix")
+    print("Getting diversity matrix")
     trainer.get_diversity_matrix()
     print("Creating discrete diversity matrix")
     trainer.create_discrete_diversity_matrix()

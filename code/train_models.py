@@ -507,7 +507,7 @@ class DiversityNESRunner:
             raise FileNotFoundError(f"Directory {root_dir} not found")
         last_index = self.get_latest_index_from_dir(root_dir)
 
-        if self.config.developer_mode:
+        if not self.config.developer_mode:
             for idx in range(1, last_index + 1):
                 json_dir = root_dir / f"models_json_{idx}"
                 pth_dir = root_dir / f"models_pth_{idx}"

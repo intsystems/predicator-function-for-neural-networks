@@ -1,25 +1,25 @@
 {
-    "seed":42,
+    "seed":-1,
     "num_workers": 4,
-    "dataset_path": "datasets/third_dataset",
+    "dataset_path": "datasets/cifar100_archs",
     "device": "cuda",
-    "developer_mode": true,
+    "developer_mode": false,
 
     "n_models": 300,
 
-    "upper_margin": 0.75,
-    "lower_margin": 0.25,
-    "diversity_matrix_metric": "overlap", 
+    "upper_margin": 0.7,
+    "lower_margin": 0.3,
+    "diversity_matrix_metric": "js", 
 
     "train_size": 0.8,
-    "batch_size": 8,
+    "batch_size": 32,
     "input_dim":8,
 
     "acc_num_epochs": 10,
     "acc_lr_start": 1e-2,
     "acc_lr_end": 1e-3,
     "acc_dropout": 0.2,
-    "acc_n_heads": 16,
+    "acc_n_heads": 8,
 
     "div_num_epochs": 10,
     "div_lr_start": 1e-3,
@@ -31,18 +31,18 @@
 
     "surrogate_inference_path": "surrogate_models/",
 
-    "use_pretrained_models_for_ensemble": false,
+    "use_pretrained_models_for_ensemble": true,
     "n_ensemble_models": 4,
     "n_models_in_pool": 256,
     "n_models_to_generate": 300,
     "batch_size_inference": 1000,
-    "min_accuracy_for_pool": 0.0,
-    "acc_distance_gamma":0.3,
-    "min_acc_and_div_to_ensemble":1.47,
+    "min_accuracy_for_pool": 0.4,
+    "acc_distance_gamma":0.5,
+    "min_acc_and_div_to_ensemble": 0.8,
     "best_models_save_path": "best_models/",
     "tmp_archs_path": "datasets/tmp_archs/",
-    "prepared_dataset_path": "output/trained_models_archs/",
-    "random_choice_out_of_best" : false,
+    "prepared_dataset_path": "datasets/cifar100_archs",
+    "random_choice_out_of_best" : true,
     "greedy_choice_out_of_best" : false,
     "no_clusters_choice": false,
 
@@ -51,7 +51,7 @@
     "lr_start_final": 0.025,
     "lr_end_final": 1e-3,
     "batch_size_final": 96,
-    "dataset_name": "CIFAR10",
+    "dataset_name": "CIFAR100",
 
     "final_dataset_path": "datasets/final_dataset/",
     "evaluate_ensemble_flag": true,

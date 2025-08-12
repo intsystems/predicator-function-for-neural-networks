@@ -97,5 +97,5 @@ def load_dataset_on_inference(config) -> None:
     config.dataset_path = Path(config.prepared_dataset_path)
 
     config.models_dict_path = []
-    for file_path in tqdm(config.dataset_path.rglob("*.json"), desc="Loading dataset"):
+    for file_path in config.dataset_path.rglob("*.json"):
         config.models_dict_path.append(file_path)
