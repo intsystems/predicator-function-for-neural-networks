@@ -90,7 +90,12 @@ class InferSurrogate:
             arch_dicts = []
             for arch_json in tqdm(self.config.models_dict_path, desc="Deleting keys"):
                 arch = json.loads(arch_json.read_text(encoding="utf-8"))
-                for key in ("test_predictions", "test_accuracy", "valid_predictions", "valid_accuracy"):
+                for key in (
+                    "test_predictions",
+                    "test_accuracy",
+                    "valid_predictions",
+                    "valid_accuracy",
+                ):
                     arch.pop(key, None)
                 arch["id"] = int(re.search(r"model_(\d+)", str(arch_json)).group(1))
                 arch_dicts.append(arch)
@@ -444,17 +449,22 @@ class InferSurrogate:
                 file_path = models_json_dir / f"model_{model_id:d}.json"
                 file_path.write_text(json.dumps(arch, indent=4), encoding="utf-8")
                 print(f"Saved model {i} in {file_path}")
-                
-                src = (
-                    Path(self.config.prepared_dataset_path.replace("archs", "pth"))
-                    / f"model_{model_id:d}.pth"
+
+                src = Path(
+                    re.sub(
+                        r"archs.*",
+                        f"pth/model_{model_id:d}.pth",
+                        str(self.config.prepared_dataset_path),
+                    )
                 )
+                
                 dst = models_pth_dir / f"model_{model_id:d}.pth"
                 shutil.copy(src, dst)
             else:
                 file_path = models_json_dir / f"model_{i:d}.json"
                 file_path.write_text(json.dumps(arch, indent=4), encoding="utf-8")
                 print(f"Saved model {i} in {file_path}")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Surrogate inference")

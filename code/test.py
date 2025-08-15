@@ -1,25 +1,40 @@
-from pathlib import Path
+import os
+import json
 import shutil
 import re
+import argparse
+from pathlib import Path
+import random
+from typing import List, Tuple
 
-src_dir = Path("datasets/third_dataset")
-dst_dir = Path("datasets/third_dataset_2")
+import numpy as np
+import torch
+import nni
+from torch.utils.data import Subset
+from torchvision import transforms
+from torchvision.datasets import CIFAR10, CIFAR100, FashionMNIST
+from nni.nas.evaluator.pytorch import DataLoader, Lightning, Trainer
+from nni.nas.space import model_context
+from tqdm import tqdm
 
-old_prefix = "sample_"
-new_prefix = "model_"
+from utils_nni.DartsSpace import DARTS_with_CIFAR100 as DartsSpace
+from dependencies.darts_classification_module import DartsClassificationModule
+from dependencies.train_config import TrainConfig
+from dependencies.data_generator import generate_arch_dicts
 
-dst_dir.mkdir(parents=True, exist_ok=True)
 
-pattern = re.compile(rf"^{re.escape(old_prefix)}0*(\d+)\.json$")
+with open("output/trained_models_archs_1/model_84.json", "r") as f:
+    arch = json.load(f)
+    arch = arch["architecture"]
 
-for file_path in src_dir.glob(f"{old_prefix}*.json"):
-    match = pattern.match(file_path.name)
-    if not match:
-        continue  # пропускаем, если имя не соответствует формату
-    
-    number = int(match.group(1))  # убираем ведущие нули автоматически
-    new_name = f"{new_prefix}{number}.json"
-    new_path = dst_dir / new_name
-    shutil.copy(file_path, new_path)
+dataset = "cifar100"
+with model_context(arch):
+    model = DartsSpace(
+        width=4,
+        num_cells=3,
+        dataset=dataset,
+        )
 
-print("✅ Готово!")
+model.to("cpu")
+model.load_state_dict(torch.load("best_models/models_pth_1/model_84.pth", map_location="cpu", weights_only=True))
+print("END")

@@ -37,7 +37,11 @@ def load_json_from_directory(directory_path: str) -> List[dict]:
                 file_path = os.path.join(root, file)
                 with open(file_path, "r", encoding="utf-8") as f:
                     try:
-                        json_data.append(json.load(f))
+                        tmp_data = json.load(f)
+                        m = re.search(r"(\d+)\.json$", file)
+                        if m and "id" not in tmp_data:
+                            tmp_data["id"] = int(m.group(1))
+                        json_data.append(tmp_data)
                     except json.JSONDecodeError as e:
                         print(f"Error decoding JSON from {file_path}: {e}")
     return json_data
@@ -62,7 +66,7 @@ DATASETS_INFO = {
         "transform": [],
     },
     "fashionmnist": {
-        "key": "cifar",  # судя по твоей логике
+        "key": "cifar",
         "class": FashionMNIST,
         "num_classes": 10,
         "mean": [0.2860406],
@@ -76,7 +80,7 @@ class DiversityNESRunner:
     def __init__(self, config: TrainConfig, info: DATASETS_INFO):
         self.config = config
         self.models = []
-        self.model_id = 0
+        self.model_id = 1
         self.dataset_key = info["key"]
         self.dataset_cls = info["class"]
         self.num_classes = info["num_classes"]
@@ -250,6 +254,7 @@ class DiversityNESRunner:
         architecture,
         valid_loader,
         folder_name="results_dataset",
+        mode="class"
     ):
         """
         Оценивает модель на валидационном наборе данных и сохраняет результаты в JSON.
@@ -259,6 +264,7 @@ class DiversityNESRunner:
         valid_loader (DataLoader): DataLoader для валидационных данных
         model_id: Уникальный идентификатор модели
         folder_name (str): Папка для сохранения результатов
+        mode (str): Тип оценки ("class" или "logits")
         """
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         os.makedirs(folder_name, exist_ok=True)
@@ -272,14 +278,17 @@ class DiversityNESRunner:
         valid_preds = []
 
         with torch.no_grad():
-            for images, labels in valid_loader:
+            for images, labels in tqdm(valid_loader, desc="Validating"):
                 images, labels = images.to(device), labels.to(device)
                 outputs = model(images)
                 outputs = torch.softmax(outputs, dim=1)
-                valid_preds.extend(outputs.cpu().tolist())
                 _, predicted = torch.max(outputs, 1)
                 valid_correct += (predicted == labels).sum().item()
                 valid_total += labels.size(0)
+                if mode == "logits":
+                    valid_preds.extend(outputs.cpu().tolist())
+                else:
+                    valid_preds.extend(predicted.cpu().tolist())
 
                 if self.config.developer_mode:
                     break
@@ -294,7 +303,7 @@ class DiversityNESRunner:
         }
 
         # Генерация имени файла с использованием model_id
-        file_name = f"model_{self.model_id:d}_results.json"
+        file_name = f"model_{self.model_id:d}.json"
         file_path = os.path.join(folder_name, file_name)
 
         # Сохранение результатов
@@ -507,17 +516,14 @@ class DiversityNESRunner:
             raise FileNotFoundError(f"Directory {root_dir} not found")
         last_index = self.get_latest_index_from_dir(root_dir)
 
-        if not self.config.developer_mode:
-            for idx in range(1, last_index + 1):
-                json_dir = root_dir / f"models_json_{idx}"
-                pth_dir = root_dir / f"models_pth_{idx}"
-                if json_dir.exists() and pth_dir.exists():
-                    self.run_pretrained(idx)
-                    self.models = []
-                else:
-                    print(f"Skipping index {idx}: missing json or pth directory.")
-        else:
-            self.run_pretrained(last_index)
+        for idx in range(1, last_index + 1):
+            json_dir = root_dir / f"models_json_{idx}"
+            pth_dir = root_dir / f"models_pth_{idx}"
+            if json_dir.exists() and pth_dir.exists():
+                self.run_pretrained(idx)
+                self.models = []
+            else:
+                print(f"Skipping index {idx}: missing json or pth directory.")
 
     def _extract_index(self, path):
         match = re.search(r"models_json_(\d+)", str(path))
@@ -550,6 +556,7 @@ class DiversityNESRunner:
         for idx, arch_entry in enumerate(tqdm(arch_dicts, desc=f"Evaluating models in index {index}")):
             arch = arch_entry["architecture"]
             model_id = arch_entry.get("id")
+            self.model_id = model_id
             if model_id is None:
                 raise ValueError(f"Architecture entry {idx} has no 'id' field")
 
@@ -566,8 +573,17 @@ class DiversityNESRunner:
             model_path = pth_dir / f"model_{model_id}.pth"
             if not model_path.exists():
                 raise FileNotFoundError(f"Model weights not found at {model_path}")
-            model.load_state_dict(torch.load(model_path, map_location=self.device))
+            model.load_state_dict(torch.load(model_path, map_location=self.device, weights_only=True))
             self.models.append(model)
+
+            if not self.config.evaluate_ensemble_flag:
+                self.evaluate_and_save_results(
+                    model,
+                    arch,
+                    valid_loader,
+                    self.config.output_path + f"/trained_models_archs_{index}/",
+                    mode="class"
+                )
 
         if self.config.evaluate_ensemble_flag:
             print(f"\nEvaluating ensemble at index {index}...")
