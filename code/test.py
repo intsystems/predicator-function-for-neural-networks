@@ -23,7 +23,7 @@ from dependencies.train_config import TrainConfig
 from dependencies.data_generator import generate_arch_dicts
 
 
-with open("output/trained_models_archs_1/model_84.json", "r") as f:
+with open("datasets/cifar100_archs/model_1000.json", "r") as f:
     arch = json.load(f)
     arch = arch["architecture"]
 
@@ -36,5 +36,5 @@ with model_context(arch):
         )
 
 model.to("cpu")
-model.load_state_dict(torch.load("best_models/models_pth_1/model_84.pth", map_location="cpu", weights_only=True))
+model.load_state_dict(torch.load("datasets/cifar100_pth/model_1000.pth", map_location="cpu", weights_only=True))
 print("END")
