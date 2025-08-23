@@ -141,7 +141,7 @@ class InferSurrogate:
                 )
             )
             dist = np.mean(np.linalg.norm(neighbors - emb, axis=1))
-            score = acc + self.config.acc_distance_gamma * dist
+            score = (1 - self.config.acc_distance_gamma) * acc + self.config.acc_distance_gamma * dist
 
             models_with_scores.append((arch, emb, acc, idx, score))
 
@@ -270,7 +270,7 @@ class InferSurrogate:
                     div_embs[[idx]], div_embs[selected_idxs], metric="euclidean"
                 )[0]
                 mean_dist = distances.mean()
-                score = acc_embs[idx] + self.config.acc_distance_gamma * mean_dist
+                score = (1 - self.config.acc_distance_gamma) * acc_embs[idx] + self.config.acc_distance_gamma * mean_dist
 
                 if score > best_score:
                     best_score = score
