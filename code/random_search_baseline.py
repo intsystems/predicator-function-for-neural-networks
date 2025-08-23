@@ -1,20 +1,14 @@
 import json
 import os
 import shutil
-import logging
 from pathlib import Path
 
 import argparse
 import torch
-from nni.nas.strategy import DARTS as DartsStrategy
-from nni.nas.experiment import NasExperiment
-from nni.nas.evaluator.pytorch import Lightning, Trainer
-from pytorch_lightning.loggers import TensorBoardLogger
 
 from dependencies.train_config import TrainConfig
 from train_models import DiversityNESRunner
-from dependencies.darts_classification_module import DartsClassificationModule
-from utils_nni.DartsSpace import DARTS_with_CIFAR100 as DartsSpace
+from train_models import DatasetsInfo
 from dependencies.data_generator import generate_arch_dicts
 
 from tqdm import tqdm
@@ -24,7 +18,8 @@ NUM_PRETRAIN_EPOCHS = 5
 
 class RandomSearchBaseline(DiversityNESRunner):
     def __init__(self, config: TrainConfig):
-        super().__init__(config)
+        info = DatasetsInfo.get(config.dataset_name.lower())
+        super().__init__(config, info)
 
         self.pretrain_epochs = NUM_PRETRAIN_EPOCHS
 
