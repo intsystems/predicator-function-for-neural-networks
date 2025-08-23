@@ -47,7 +47,7 @@ Using this function, we develop an efficient NES framework that enables the sele
 ```json
 {
     "seed":42,   // Сид для воспроизводимости
-    "num_workers": 4, // Количество процессов для загрузки данных
+    "num_workers": 4, // Количество ядер процессора для загрузки данных
     "device": "cpu", // Устройство для вычислений
     "developer_mode": true, // Режим разработчика (в нем модели обучаются лишь на одном батче)
 }
@@ -68,7 +68,6 @@ Using this function, we develop an efficient NES framework that enables the sele
 {
     "n_models_to_evaluate": 100,        // Количество моделей для генерации, если подготавливаем датасет, иначе ни на что не влияет
     "evaluate_ensemble_flag": false,     // Флаг оценки ансамбля (true/false). Если true, то оцениваем ансамбль, если false, то подготавливаем датасет
-    "prepared_dataset_path": "datasets/evaluated_dataset/", // По этому пути лежит подготовленный датасет
     "best_models_save_path": "best_models/", // Путь к архитектурам моделей, из которых составляется ансамбль
     "dataset_name": "CIFAR10",           // Используемый датасет (CIFAR10/CIFAR100/FashionMNIST)
     "final_dataset_path": "datasets/final_dataset/", // Путь к папке, куда будем скачивать датасеты для обучения моделей
@@ -108,8 +107,8 @@ Using this function, we develop an efficient NES framework that enables the sele
 ### Гиперпараметры:
 ```json
 {
-    "dataset_path": "datasets/third_dataset/", // Путь к датасету архитектур
-    "n_models": 300,                     // Количество используемых моделей
+    "dataset_path": "datasets/cifar100_archs", // Путь к датасету архитектур моделей на которых будут обучаться суррогатные функции
+    "n_models": 300,                     // Количество используемых моделей (не больше, чем в датасете)
     "diversity_matrix_metric": "overlap", // Метрика разнообразия (overlap/js)
     "upper_margin": 0.75,                // Верхний квантиль для дискретизации матрицы похожести
     "lower_margin": 0.25,                // Нижний квантиль для дискретизации матрицы похожести
@@ -126,11 +125,9 @@ Using this function, we develop an efficient NES framework that enables the sele
     "div_n_heads": 4,                    // Количество голов в модели разнообразия
     "margin": 1,                         // Отступ для triplet loss
     "div_output_dim": 128,               // Размерность эмбеддинга разнообразия
-    "surrogate_inference_path": "surrogate_models/", // Путь для сохранения моделей
+    "surrogate_inference_path": "surrogate_models/", // Путь для сохранения суррогатных моделей
     "train_size": 0.8,                   // Размер тренировочной выборки
     "batch_size": 8,                     // Размер батча
-    "draw_fig_acc": false,               // Отрисовывать ли график зависимости точности от эпохи (true/false)
-    "draw_fig_div": false,               // Отрисовывать ли график зависимости triplet loss от эпохи (true/false)   
 }
 ```
 
@@ -162,14 +159,23 @@ Using this function, we develop an efficient NES framework that enables the sele
 ### Гиперпараметры:
 ```json
 {
-    "n_ensemble_models": 2,              // Количество моделей в ансамбле
-    "n_models_in_pool": 128,             // Размер пула кандидатов
-    "n_models_to_generate": 4096,        // Количество генерируемых архитектур
-    "min_accuracy_for_pool": 0.01,       // Минимальная точность для попадания в пул
-    "plot_tsne": false,                  // Флаг визуализации t-SNE
-    "best_models_save_path": "best_models/" // Путь для сохранения лучших архитектур
+    "n_ensemble_models": 2,                           // Количество моделей в ансамбле
+    "n_models_in_pool": 128,                          // Размер пула кандидатов
+    "n_models_to_generate": 4096,                     // Количество генерируемых архитектур
+    "min_accuracy_for_pool": 0.01,                    // Минимальная точность для попадания в пул
+    "acc_distance_gamma":0.5,                         // Коэффициент gamma для расчёта score: (1 - gamma) * acc + gamma * dist
+    "min_acc_and_div_to_ensemble": 0.01,              // Трешхолд score
+    "random_choice_out_of_best" : false,              // Выборием случайные архитектуры прошедшие трешхолд по точности
+    "greedy_choice_out_of_best" : true,               // Эволюционный алгоритм, выбираем лучше архитектуры по score: (1 - gamma) * acc + gamma * dist
+    "no_clusters_choice": false,                      // Жадно выбираем по score: (1 - gamma) * acc + gamma * dist модели из сгенерированных
+    "best_models_save_path": "best_models/",          // Путь для сохранения лучших архитектур
+    "tmp_archs_path": "datasets/tmp_archs/",          // Временное хранилище для генерируемых архитектур
+    "prepared_dataset_path": "datasets/cifar100_archs", // Путь к уже обученным моделям(веса должны лежать по тому же пути,
+    //  но иметь постфикс _pth вместо _archs)
 }
 ```
+Если не выбран ни один из методов генерации ансамбля, то ансамбль генерируется из моделей, соответствующих центроидам эмбеддингов, где кластеризация происходит среди моделей прошедших трешхолд по точности.
+
 
 ### Процесс работы:
 1. Загрузка обученных суррогатных моделей

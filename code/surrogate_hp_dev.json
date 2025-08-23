@@ -3,7 +3,7 @@
     "num_workers": 4,
     "dataset_path": "datasets/cifar100_archs",
     "device": "cuda",
-    "developer_mode": false,
+    "developer_mode": true,
 
     "n_models": 1086,
 
@@ -15,13 +15,13 @@
     "batch_size": 32,
     "input_dim":8,
 
-    "acc_num_epochs": 30,
+    "acc_num_epochs": 10,
     "acc_lr_start": 1e-2,
     "acc_lr_end": 1e-3,
     "acc_dropout": 0.2,
     "acc_n_heads": 8,
 
-    "div_num_epochs": 30,
+    "div_num_epochs": 10,
     "div_lr_start": 1e-3,
     "div_lr_end": 1e-4,
     "div_dropout": 0.1,
@@ -31,20 +31,20 @@
 
     "surrogate_inference_path": "surrogate_models/",
 
-    "use_pretrained_models_for_ensemble": true,
+    "use_pretrained_models_for_ensemble": false,
     "n_ensemble_models": 4,
     "n_models_in_pool": 256,
     "n_models_to_generate": 300,
     "batch_size_inference": 1000,
-    "min_accuracy_for_pool": 0.49,
-    "acc_distance_gamma":0.8,
-    "min_acc_and_div_to_ensemble": 1,
+    "min_accuracy_for_pool": 0.1,
+    "acc_distance_gamma":0.5,
+    "min_acc_and_div_to_ensemble": 0.01,
     "best_models_save_path": "best_models/",
     "tmp_archs_path": "datasets/tmp_archs/",
     "prepared_dataset_path": "datasets/cifar100_archs",
     "random_choice_out_of_best" : false,
-    "greedy_choice_out_of_best" : false,
-    "no_clusters_choice": true,
+    "greedy_choice_out_of_best" : true,
+    "no_clusters_choice": false,
 
 
     "n_epochs_final": 200,
@@ -54,7 +54,7 @@
     "dataset_name": "CIFAR100",
 
     "final_dataset_path": "datasets/final_dataset/",
-    "evaluate_ensemble_flag": true,
+    "evaluate_ensemble_flag": false,
     "n_models_to_evaluate":10,
     "output_path": "output/",
     "width": 4,
