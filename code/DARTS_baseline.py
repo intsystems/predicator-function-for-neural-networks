@@ -14,6 +14,7 @@ from dependencies.train_config import TrainConfig
 from train_models import DiversityNESRunner
 from dependencies.darts_classification_module import DartsClassificationModule
 from utils_nni.DartsSpace import DARTS_with_CIFAR100 as DartsSpace
+from train_models import DatasetsInfo
 
 from tqdm import tqdm
 
@@ -24,30 +25,16 @@ logger = logging.getLogger(__name__)
 
 class DartsBaseline(DiversityNESRunner):
     def __init__(self, config: TrainConfig):
-        super().__init__(config)
+        info = DatasetsInfo.get(config.dataset_name.lower())
+        super().__init__(config, info)
 
-        dataset_map = {
-            "cifar10": "cifar",
-            "cifar100": "cifar100",
-            "fashionmnist": "cifar"
-        }
-
-        if self.config.dataset_name.lower() not in dataset_map:
-            raise ValueError(f"Unknown dataset: {self.config.dataset_name}")
-        self.dataset = dataset_map[self.config.dataset_name.lower()]
-
-        self.num_classes = {
-            "cifar10": 10,
-            "cifar100": 100,
-            "fashionmnist": 10
-        }[self.config.dataset_name.lower()]
     
     def get_best_models(self, train_loader, valid_loader):
         strategy = DartsStrategy(gradient_clip_val=5.)
         model_space = DartsSpace(
             width=self.config.width,           # the initial filters (channel number) for the model
             num_cells=self.config.num_cells,        # the number of stacked cells in total
-            dataset=self.dataset
+            dataset=self.dataset_key
         )
 
         devices_arg = 1 if self.device.type == "cuda" else "auto"
