@@ -16,6 +16,7 @@ class DartsClassificationModule(ClassificationModule):
         self.auxiliary_loss_weight = auxiliary_loss_weight
         # Training length will be used in LR scheduler
         self.max_epochs = max_epochs
+        self.lr_final = lr_final
         super().__init__(learning_rate=learning_rate, weight_decay=weight_decay, export_onnx=False, num_classes=num_classes)
         
     def configure_optimizers(self):
@@ -28,7 +29,7 @@ class DartsClassificationModule(ClassificationModule):
         )
         # Cosine annealing scheduler with T_max equal to total epochs
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=self.max_epochs, eta_min=1e-3
+            optimizer, T_max=self.max_epochs, eta_min=self.lr_final
         )
         return {
             'optimizer': optimizer,

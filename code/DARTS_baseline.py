@@ -56,11 +56,12 @@ class DartsBaseline(DiversityNESRunner):
 
         evaluator = Lightning(
             DartsClassificationModule(
-                learning_rate=self.config.lr_final,
+                learning_rate=self.config.lr_start_final,
                 weight_decay=3e-4,
                 auxiliary_loss_weight=0.4,
                 max_epochs=self.config.n_epochs_final,
                 num_classes=self.num_classes,
+                lr_final=self.config.lr_end_final
             ),
             trainer=Trainer(
                 max_epochs=self.config.n_epochs_final,
