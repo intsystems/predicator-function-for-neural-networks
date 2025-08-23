@@ -46,38 +46,49 @@ def load_json_from_directory(directory_path: str) -> List[dict]:
                         print(f"Error decoding JSON from {file_path}: {e}")
     return json_data
 
-DATASETS_INFO = {
-    "cifar10": {
-        "key": "cifar",
-        "class": CIFAR10,
-        "num_classes": 10,
-        "mean": [0.4914, 0.4822, 0.4465],
-        "std": [0.2470, 0.2435, 0.2616],
-        "img_size": 32,
-        "transform": [],
-    },
-    "cifar100": {
-        "key": "cifar100",
-        "class": CIFAR100,
-        "num_classes": 100,
-        "mean": [0.5071, 0.4867, 0.4408],
-        "std": [0.2673, 0.2564, 0.2762],
-        "img_size": 32,
-        "transform": [],
-    },
-    "fashionmnist": {
-        "key": "cifar",
-        "class": FashionMNIST,
-        "num_classes": 10,
-        "mean": [0.2860406],
-        "std": [0.35302424],
-        "img_size": 32,
-        "transform": [transforms.Resize(32)],
-    },
-}
+class DatasetsInfo:
+    DATASETS = {
+        "cifar10": {
+            "key": "cifar",
+            "class": CIFAR10,
+            "num_classes": 10,
+            "mean": [0.4914, 0.4822, 0.4465],
+            "std": [0.2470, 0.2435, 0.2616],
+            "img_size": 32,
+            "transform": [],
+        },
+        "cifar100": {
+            "key": "cifar100",
+            "class": CIFAR100,
+            "num_classes": 100,
+            "mean": [0.5071, 0.4867, 0.4408],
+            "std": [0.2673, 0.2564, 0.2762],
+            "img_size": 32,
+            "transform": [],
+        },
+        "fashionmnist": {
+            "key": "cifar",
+            "class": FashionMNIST,
+            "num_classes": 10,
+            "mean": [0.2860406],
+            "std": [0.35302424],
+            "img_size": 32,
+            "transform": [transforms.Resize(32)],
+        },
+    }
+
+    @classmethod
+    def get(cls, name: str):
+        """Вернуть словарь с информацией о датасете по имени"""
+        return cls.DATASETS.get(name)
+
+    @classmethod
+    def available_datasets(cls):
+        """Вернуть список доступных датасетов"""
+        return list(cls.DATASETS.keys())
 
 class DiversityNESRunner:
-    def __init__(self, config: TrainConfig, info: DATASETS_INFO):
+    def __init__(self, config: TrainConfig, info: DatasetsInfo):
         self.config = config
         self.models = []
         self.model_id = 1
@@ -122,7 +133,6 @@ class DiversityNESRunner:
         )
 
         dataset_cls = self.dataset_cls
-        self.num_classes = self.num_classes
 
         train_data = nni.trace(dataset_cls)(
             root=self.config.final_dataset_path,
@@ -608,7 +618,7 @@ if __name__ == "__main__":
     params.update({"device": "cuda:0" if torch.cuda.is_available() else "cpu"})
     
     config = TrainConfig(**params)
-    info = DATASETS_INFO[config.dataset_name.lower()]
+    info = DatasetsInfo.get(config.dataset_name.lower())
     runner = DiversityNESRunner(config, info)
     if config.use_pretrained_models_for_ensemble:
         runner.run_all_pretrained()
