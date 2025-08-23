@@ -1,26 +1,13 @@
 import json
-import os
-import logging
 from pathlib import Path
 
 import argparse
 import torch
-from nni.nas.strategy import DARTS as DartsStrategy
-from nni.nas.experiment import NasExperiment
-from nni.nas.evaluator.pytorch import Lightning, Trainer
-from pytorch_lightning.loggers import TensorBoardLogger
 
 from dependencies.train_config import TrainConfig
-from dependencies.darts_classification_module import DartsClassificationModule
-from utils_nni.DartsSpace import DARTS_with_CIFAR100 as DartsSpace
 from DARTS_baseline import DartsBaseline
 
 from tqdm import tqdm
-
-# Setup logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
 
 class DeepEnsBaseline(DartsBaseline):
     def __init__(self, config: TrainConfig):
