@@ -459,7 +459,6 @@ def train_model_accuracy(
     device="cpu",
     developer_mode=False,
     final_lr=0.001,
-    draw_figure=False,
 ):
     model.to(device)
     train_losses = []
@@ -521,8 +520,8 @@ def train_model_accuracy(
             f"Valid Loss: {avg_valid_loss * 1e4:.4f}, LR: {lr:.6f}"
         )
 
-    tmp_train_losses = np.array(train_losses) * 1e4
-    tmp_valid_losses = np.array(valid_losses) * 1e4
+    tmp_train_losses = np.sqrt(np.array(train_losses))
+    tmp_valid_losses = np.sqrt(np.array(valid_losses))
     plot_train_valid_losses(tmp_train_losses, tmp_valid_losses, file_name="accuracy_model.png")
 
     return train_losses, valid_losses
@@ -540,7 +539,7 @@ def plot_train_valid_losses(train_losses, valid_losses, file_name="train_valid_l
     )
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
-    plt.ylim(0, 5)
+    plt.ylim(None, np.median(valid_losses) * 2)
     plt.grid(True)
     plt.legend()
     plt.tight_layout()

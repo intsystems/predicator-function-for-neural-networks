@@ -119,6 +119,7 @@ class SurrogateTrainer:
                 else data["test_accuracy"]
             )
         self.log_accuracies(accs)
+        accs = np.array(accs) * 100
         return accs
 
     def log_accuracies(self, accs):
@@ -189,12 +190,12 @@ class SurrogateTrainer:
         )
 
     def train_accuracy_model(self) -> None:
-        self.config.model_accuracy = GAT_ver_2(
+        self.config.model_accuracy = GAT_ver_1(
             self.config.input_dim,
             output_dim=1,
             dropout=self.config.acc_dropout,
             heads=self.config.acc_n_heads,
-            output_activation="sigmoid"
+            output_activation="none"
         )
         opt = torch.optim.AdamW(
             self.config.model_accuracy.parameters(), lr=self.config.acc_lr_start
