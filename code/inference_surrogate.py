@@ -72,6 +72,12 @@ class InferSurrogate:
         self.config.model_diversity.load_state_dict(state_dict)
         self.config.model_diversity.eval()
 
+    def _get_score(self, accuracy, dist):
+        return (
+            (1 - self.config.acc_distance_gamma) * accuracy / 100
+            + self.config.acc_distance_gamma * dist
+        )
+
     def _find_dist_to_best(self, best_embs, emb):
         """
         best_embs: tensor [k, d], emb: tensor [d] или [1, d]
@@ -141,8 +147,7 @@ class InferSurrogate:
                 )
             )
             dist = np.mean(np.linalg.norm(neighbors - emb, axis=1))
-            score = (1 - self.config.acc_distance_gamma) * acc + self.config.acc_distance_gamma * dist
-
+            score = self._get_score(acc, dist)
             models_with_scores.append((arch, emb, acc, idx, score))
 
         models_with_scores.sort(key=lambda x: x[4], reverse=True)
@@ -270,7 +275,7 @@ class InferSurrogate:
                     div_embs[[idx]], div_embs[selected_idxs], metric="euclidean"
                 )[0]
                 mean_dist = distances.mean()
-                score = (1 - self.config.acc_distance_gamma) * acc_embs[idx] + self.config.acc_distance_gamma * mean_dist
+                score = self._get_score(acc_embs[idx], mean_dist)
 
                 if score > best_score:
                     best_score = score
@@ -285,10 +290,7 @@ class InferSurrogate:
         first_distances = cdist(
             div_embs[[first_idx]], other_div_embs, metric="euclidean"
         )[0]
-        first_score = (
-            acc_embs[first_idx]
-            + self.config.acc_distance_gamma * first_distances.mean()
-        )
+        first_score = self._get_score(acc_embs[first_idx], first_distances.mean())
         scores[0] = first_score
 
         self.config.selected_archs = [
@@ -457,7 +459,7 @@ class InferSurrogate:
                         str(self.config.prepared_dataset_path),
                     )
                 )
-                
+
                 dst = models_pth_dir / f"model_{model_id:d}.pth"
                 shutil.copy(src, dst)
             else:
