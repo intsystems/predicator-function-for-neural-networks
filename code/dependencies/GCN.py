@@ -20,10 +20,10 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 import numpy as np
 from torch.utils.data import Dataset
-from joblib import Parallel, delayed
 from torch_geometric.data import Data, Batch
-from torch_geometric.loader import DataLoader
 from torch_geometric.utils import dropout_edge
+from torch_geometric.nn import GATv2Conv, GraphNorm
+from torch_geometric.nn.aggr import AttentionalAggregation
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from Graph import Graph
@@ -146,25 +146,60 @@ class GCN(nn.Module):
             x = torch.sigmoid(x)
         return x
 
-
 class GATBlock(nn.Module):
-    def __init__(self, in_dim, out_dim, heads=1, dropout=0.5):
+    """
+    - Identity residual, если in_dim == out_dim
+    - Опциональный Pre-Norm (pre_norm=True) или Post-Norm (False)
+    - ELU по умолчанию
+    - DropEdge (edge_dropout > 0)
+    """
+    def __init__(
+        self,
+        in_dim: int,
+        out_dim: int,
+        heads: int = 1,
+        dropout: float = 0.5,
+        edge_dropout: float = 0.0,
+        pre_norm: bool = False,
+        activation: nn.Module = None,
+    ):
         super().__init__()
+        assert out_dim % heads == 0, "out_dim должно быть кратно числу голов."
+
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+        self.pre_norm = pre_norm
+        self.edge_dropout = float(edge_dropout)
+
         self.gat = GATv2Conv(in_dim, out_dim // heads, heads=heads)
-        self.res_proj = nn.Linear(in_dim, out_dim)
+        self.res_proj = nn.Identity() if in_dim == out_dim else nn.Linear(in_dim, out_dim)
         self.norm = GraphNorm(out_dim)
         self.dropout = nn.Dropout(dropout)
+        self.act = activation if activation is not None else nn.ELU()
 
-    def forward(self, x, edge_index):
-        h = self.gat(x, edge_index)
-        h = F.leaky_relu(h + self.res_proj(x))
-        h = self.norm(h)
+    def reset_parameters(self):
+        self.gat.reset_parameters()
+        if isinstance(self.res_proj, nn.Linear):
+            nn.init.xavier_uniform_(self.res_proj.weight)
+            if self.res_proj.bias is not None:
+                nn.init.zeros_(self.res_proj.bias)
+
+    def forward(self, x, edge_index, batch):
+        # Edge dropout (только в train)
+        if self.training and self.edge_dropout > 0.0:
+            edge_index, _ = dropout_edge(edge_index, p=self.edge_dropout, training=True)
+
+        x_for_gat = self.norm(x, batch) if self.pre_norm else x
+        h = self.gat(x_for_gat, edge_index)
+        res = self.res_proj(x)
+        h = self.act(h + res)
+        if not self.pre_norm:
+            h = self.norm(h, batch)
         h = self.dropout(h)
         return h
 
-
-class GAT(nn.Module):
-    def __init__(self, input_dim, output_dim=16, dropout=0.5, pooling="max", heads=4):
+class GAT_ver_1(nn.Module):
+    def __init__(self, input_dim, output_dim=16, dropout=0.5, pooling="max", heads=4, output_activation="none"):
         super().__init__()
         self.hidden_dim = 64
         self.output_dim = output_dim
@@ -180,11 +215,13 @@ class GAT(nn.Module):
         self.fc_norm = nn.LayerNorm(self.hidden_dim)
         self.fc2 = nn.Linear(self.hidden_dim, output_dim)
 
+        self.output_activation = output_activation
+
     def forward(self, x, edge_index, batch=None):
-        h1 = self.block1(x, edge_index)
-        h2 = self.block2(h1, edge_index)
-        h3 = self.block3(h2, edge_index)
-        h4 = self.block4(h3, edge_index)
+        h1 = self.block1(x, edge_index, batch)
+        h2 = self.block2(h1, edge_index, batch)
+        h3 = self.block3(h2, edge_index, batch)
+        h4 = self.block4(h3, edge_index, batch)
 
         # Global pooling
         if self.pooling == "max":
@@ -202,9 +239,120 @@ class GAT(nn.Module):
         out = F.leaky_relu(out)
         out = self.fc2(out)
 
-        if self.output_dim == 1:
+        if self.output_activation == "sigmoid" and self.output_dim == 1:
             return torch.sigmoid(out)
-        return F.normalize(out, p=2, dim=-1)
+        elif self.output_activation == "softmax":
+            return F.log_softmax(out, dim=-1)
+        elif self.output_activation == "l2":
+            return F.normalize(out, p=2, dim=-1)
+        else:
+            return out
+
+class GAT_ver_2(nn.Module):
+    def __init__(
+        self,
+        input_dim: int,
+        output_dim: int = 16,
+        dropout: float = 0.5,
+        heads: int = 4,
+        output_activation: str = "none",
+        pooling: str = "attn",
+        edge_dropout: float = 0.1,
+        pre_norm: bool = False,
+    ):
+        super().__init__()
+        self.hidden_dim = 64
+        self.output_dim = output_dim
+        self.output_activation = output_activation
+        self.pooling = pooling
+
+        act = nn.ELU()
+
+        self.block1 = GATBlock(input_dim, self.hidden_dim, heads=heads,
+                               dropout=dropout, edge_dropout=edge_dropout,
+                               pre_norm=pre_norm, activation=act)
+        self.block2 = GATBlock(self.hidden_dim, 256, heads=heads,
+                               dropout=dropout, edge_dropout=edge_dropout,
+                               pre_norm=pre_norm, activation=act)
+        self.block3 = GATBlock(256, 256, heads=heads,
+                               dropout=dropout, edge_dropout=edge_dropout,
+                               pre_norm=pre_norm, activation=act)
+        self.block4 = GATBlock(256, self.hidden_dim, heads=heads,
+                               dropout=dropout, edge_dropout=edge_dropout,
+                               pre_norm=pre_norm, activation=act)
+
+        def make_attn_pool(d):
+            gate_nn = nn.Sequential(
+                nn.Linear(d, max(1, d // 2)),
+                nn.ReLU(),
+                nn.Linear(max(1, d // 2), 1),
+            )
+            return AttentionalAggregation(gate_nn)
+
+        self.attn1 = make_attn_pool(self.hidden_dim)  # 64
+        self.attn2 = make_attn_pool(256)
+        self.attn3 = make_attn_pool(256)
+        self.attn4 = make_attn_pool(self.hidden_dim)  # 64
+
+        self.jk_proj = nn.Linear(self.hidden_dim + 256 + 256 + self.hidden_dim,
+                                 self.hidden_dim)
+
+        self.fc1 = nn.Linear(self.hidden_dim, self.hidden_dim)
+        self.fc_norm = nn.LayerNorm(self.hidden_dim)
+        self.fc_drop = nn.Dropout(dropout)
+        self.fc2 = nn.Linear(self.hidden_dim, output_dim)
+    #     self.reset_parameters()
+    
+    # def reset_parameters(self):
+    #     for block in [self.block1, self.block2, self.block3, self.block4]:
+    #         block.reset_parameters()
+    #     nn.init.xavier_uniform_(self.fc1.weight)
+    #     nn.init.xavier_uniform_(self.fc2.weight)
+    #     nn.init.zeros_(self.fc1.bias)
+    #     nn.init.zeros_(self.fc2.bias)
+        
+    def forward(self, x, edge_index, batch):
+        h1 = self.block1(x, edge_index, batch)
+        h2 = self.block2(h1, edge_index, batch)
+        h3 = self.block3(h2, edge_index, batch)
+        h4 = self.block4(h3, edge_index, batch)
+
+        if self.pooling == "attn":
+            p1 = self.attn1(h1, batch)
+            p2 = self.attn2(h2, batch)
+            p3 = self.attn3(h3, batch)
+            p4 = self.attn4(h4, batch)
+        elif self.pooling in {"max", "mean", "sum"}:
+            from torch_geometric.nn import global_max_pool, global_mean_pool, global_add_pool
+            pool_fn = {
+                "max": global_max_pool,
+                "mean": global_mean_pool,
+                "sum": global_add_pool,
+            }[self.pooling]
+            p1 = pool_fn(h1, batch)
+            p2 = pool_fn(h2, batch)
+            p3 = pool_fn(h3, batch)
+            p4 = pool_fn(h4, batch)
+        else:
+            raise ValueError("Unsupported pooling method. Use 'attn', 'max', 'mean' or 'sum'.")
+
+        hg = torch.cat([p1, p2, p3, p4], dim=-1)
+        hg = self.jk_proj(hg)
+
+        out = self.fc1(hg)
+        out = self.fc_norm(out)
+        out = F.elu(out)
+        out = self.fc_drop(out)
+        out = self.fc2(out)
+
+        if self.output_activation == "sigmoid" and self.output_dim == 1:
+            return torch.sigmoid(out)
+        elif self.output_activation == "softmax":
+            return F.log_softmax(out, dim=-1)
+        elif self.output_activation == "l2":
+            return F.normalize(out, p=2, dim=-1)
+        else:
+            return out
 
 class CustomDataset(Dataset):
     @staticmethod
@@ -512,6 +660,7 @@ def plot_train_valid_losses(train_losses, valid_losses, file_name="train_valid_l
     )
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
+    plt.ylim(0, 5)
     plt.grid(True)
     plt.legend()
     plt.tight_layout()

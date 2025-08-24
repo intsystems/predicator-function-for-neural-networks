@@ -24,7 +24,8 @@ sys.path.insert(1, "../dependencies")
 from dependencies.data_generator import load_dataset
 from dependencies.train_config import TrainConfig
 from dependencies.GCN import (
-    GAT,
+    GAT_ver_1,
+    GAT_ver_2,
     CustomDataset,
     TripletGraphDataset,
     train_model_accuracy,
@@ -188,11 +189,12 @@ class SurrogateTrainer:
         )
 
     def train_accuracy_model(self) -> None:
-        self.config.model_accuracy = GAT(
+        self.config.model_accuracy = GAT_ver_2(
             self.config.input_dim,
             output_dim=1,
             dropout=self.config.acc_dropout,
             heads=self.config.acc_n_heads,
+            output_activation="sigmoid"
         )
         opt = torch.optim.AdamW(
             self.config.model_accuracy.parameters(), lr=self.config.acc_lr_start
@@ -217,11 +219,12 @@ class SurrogateTrainer:
         return F.relu(d_ap - d_an + self.config.margin).mean()
 
     def train_diversity_model(self) -> None:
-        self.config.model_diversity = GAT(
+        self.config.model_diversity = GAT_ver_2(
             self.config.input_dim,
             self.config.div_output_dim,
             dropout=self.config.div_dropout,
             heads=self.config.div_n_heads,
+            output_activation="l2"
         )
         
         opt = torch.optim.AdamW(
