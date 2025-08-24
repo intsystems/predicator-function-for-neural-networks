@@ -26,6 +26,7 @@ from torch_geometric.nn.aggr import AttentionalAggregation
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from Graph import Graph
 
+
 class GATBlock(nn.Module):
     """
     - Identity residual, если in_dim == out_dim
@@ -33,6 +34,7 @@ class GATBlock(nn.Module):
     - ELU по умолчанию
     - DropEdge (edge_dropout > 0)
     """
+
     def __init__(
         self,
         in_dim: int,
@@ -52,7 +54,9 @@ class GATBlock(nn.Module):
         self.edge_dropout = float(edge_dropout)
 
         self.gat = GATv2Conv(in_dim, out_dim // heads, heads=heads)
-        self.res_proj = nn.Identity() if in_dim == out_dim else nn.Linear(in_dim, out_dim)
+        self.res_proj = (
+            nn.Identity() if in_dim == out_dim else nn.Linear(in_dim, out_dim)
+        )
         self.norm = GraphNorm(out_dim)
         self.dropout = nn.Dropout(dropout)
         self.act = activation if activation is not None else nn.ELU()
@@ -78,8 +82,17 @@ class GATBlock(nn.Module):
         h = self.dropout(h)
         return h
 
+
 class GAT_ver_1(nn.Module):
-    def __init__(self, input_dim, output_dim=16, dropout=0.5, pooling="max", heads=4, output_activation="none"):
+    def __init__(
+        self,
+        input_dim,
+        output_dim=16,
+        dropout=0.5,
+        pooling="max",
+        heads=4,
+        output_activation="none",
+    ):
         super().__init__()
         self.hidden_dim = 64
         self.output_dim = output_dim
@@ -128,6 +141,7 @@ class GAT_ver_1(nn.Module):
         else:
             return out
 
+
 class GAT_ver_2(nn.Module):
     def __init__(
         self,
@@ -148,18 +162,42 @@ class GAT_ver_2(nn.Module):
 
         act = nn.ELU()
 
-        self.block1 = GATBlock(input_dim, self.hidden_dim, heads=heads,
-                               dropout=dropout, edge_dropout=edge_dropout,
-                               pre_norm=pre_norm, activation=act)
-        self.block2 = GATBlock(self.hidden_dim, 256, heads=heads,
-                               dropout=dropout, edge_dropout=edge_dropout,
-                               pre_norm=pre_norm, activation=act)
-        self.block3 = GATBlock(256, 256, heads=heads,
-                               dropout=dropout, edge_dropout=edge_dropout,
-                               pre_norm=pre_norm, activation=act)
-        self.block4 = GATBlock(256, self.hidden_dim, heads=heads,
-                               dropout=dropout, edge_dropout=edge_dropout,
-                               pre_norm=pre_norm, activation=act)
+        self.block1 = GATBlock(
+            input_dim,
+            self.hidden_dim,
+            heads=heads,
+            dropout=dropout,
+            edge_dropout=edge_dropout,
+            pre_norm=pre_norm,
+            activation=act,
+        )
+        self.block2 = GATBlock(
+            self.hidden_dim,
+            256,
+            heads=heads,
+            dropout=dropout,
+            edge_dropout=edge_dropout,
+            pre_norm=pre_norm,
+            activation=act,
+        )
+        self.block3 = GATBlock(
+            256,
+            256,
+            heads=heads,
+            dropout=dropout,
+            edge_dropout=edge_dropout,
+            pre_norm=pre_norm,
+            activation=act,
+        )
+        self.block4 = GATBlock(
+            256,
+            self.hidden_dim,
+            heads=heads,
+            dropout=dropout,
+            edge_dropout=edge_dropout,
+            pre_norm=pre_norm,
+            activation=act,
+        )
 
         def make_attn_pool(d):
             gate_nn = nn.Sequential(
@@ -174,23 +212,15 @@ class GAT_ver_2(nn.Module):
         self.attn3 = make_attn_pool(256)
         self.attn4 = make_attn_pool(self.hidden_dim)  # 64
 
-        self.jk_proj = nn.Linear(self.hidden_dim + 256 + 256 + self.hidden_dim,
-                                 self.hidden_dim)
+        self.jk_proj = nn.Linear(
+            self.hidden_dim + 256 + 256 + self.hidden_dim, self.hidden_dim
+        )
 
         self.fc1 = nn.Linear(self.hidden_dim, self.hidden_dim)
         self.fc_norm = nn.LayerNorm(self.hidden_dim)
         self.fc_drop = nn.Dropout(dropout)
         self.fc2 = nn.Linear(self.hidden_dim, output_dim)
-    #     self.reset_parameters()
-    
-    # def reset_parameters(self):
-    #     for block in [self.block1, self.block2, self.block3, self.block4]:
-    #         block.reset_parameters()
-    #     nn.init.xavier_uniform_(self.fc1.weight)
-    #     nn.init.xavier_uniform_(self.fc2.weight)
-    #     nn.init.zeros_(self.fc1.bias)
-    #     nn.init.zeros_(self.fc2.bias)
-        
+
     def forward(self, x, edge_index, batch):
         h1 = self.block1(x, edge_index, batch)
         h2 = self.block2(h1, edge_index, batch)
@@ -203,7 +233,12 @@ class GAT_ver_2(nn.Module):
             p3 = self.attn3(h3, batch)
             p4 = self.attn4(h4, batch)
         elif self.pooling in {"max", "mean", "sum"}:
-            from torch_geometric.nn import global_max_pool, global_mean_pool, global_add_pool
+            from torch_geometric.nn import (
+                global_max_pool,
+                global_mean_pool,
+                global_add_pool,
+            )
+
             pool_fn = {
                 "max": global_max_pool,
                 "mean": global_mean_pool,
@@ -214,7 +249,9 @@ class GAT_ver_2(nn.Module):
             p3 = pool_fn(h3, batch)
             p4 = pool_fn(h4, batch)
         else:
-            raise ValueError("Unsupported pooling method. Use 'attn', 'max', 'mean' or 'sum'.")
+            raise ValueError(
+                "Unsupported pooling method. Use 'attn', 'max', 'mean' or 'sum'."
+            )
 
         hg = torch.cat([p1, p2, p3, p4], dim=-1)
         hg = self.jk_proj(hg)
@@ -233,6 +270,7 @@ class GAT_ver_2(nn.Module):
             return F.normalize(out, p=2, dim=-1)
         else:
             return out
+
 
 class CustomDataset(Dataset):
     @staticmethod
@@ -449,6 +487,7 @@ def train_model_diversity(
 
     return train_losses, valid_losses
 
+
 def train_model_accuracy(
     model,
     train_loader,
@@ -522,12 +561,16 @@ def train_model_accuracy(
 
     tmp_train_losses = np.sqrt(np.array(train_losses))
     tmp_valid_losses = np.sqrt(np.array(valid_losses))
-    plot_train_valid_losses(tmp_train_losses, tmp_valid_losses, file_name="accuracy_model.png")
+    plot_train_valid_losses(
+        tmp_train_losses, tmp_valid_losses, file_name="accuracy_model.png"
+    )
 
     return train_losses, valid_losses
 
 
-def plot_train_valid_losses(train_losses, valid_losses, file_name="train_valid_losses.png"):
+def plot_train_valid_losses(
+    train_losses, valid_losses, file_name="train_valid_losses.png"
+):
     os.makedirs("logs", exist_ok=True)
     plt.figure(figsize=(12, 6))
     plt.rc("font", size=20)
