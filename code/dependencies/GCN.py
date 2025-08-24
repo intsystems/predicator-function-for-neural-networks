@@ -6,8 +6,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn import (
-    GCNConv,
-    GATConv,
     GATv2Conv,
     global_max_pool,
     global_mean_pool,
@@ -27,124 +25,6 @@ from torch_geometric.nn.aggr import AttentionalAggregation
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from Graph import Graph
-
-class SimpleGCN(nn.Module):
-    def __init__(
-        self, input_dim, embedding_dim, hidden_dim=64, dropout=0.5, pooling="max"
-    ):
-        """
-        input_dim: размер входных признаков узлов
-        hidden_dim: размер скрытого пространства в графовых свёрточных слоях
-        embedding_dim: размер итогового графового эмбеддинга
-        dropout: вероятность исключения узлов для регуляризации
-        pooling: тип агрегации ('max', 'mean' или 'sum')
-        """
-        super(SimpleGCN, self).__init__()
-
-        self.input_dim = input_dim
-        self.hidden_dim = hidden_dim
-        self.embedding_dim = embedding_dim
-        self.pooling = pooling
-
-        self.gc1 = GCNConv(input_dim, hidden_dim)
-        self.gc2 = GCNConv(hidden_dim, hidden_dim)
-
-        self.graph_norm = GraphNorm(hidden_dim)
-        self.layer_norm = nn.LayerNorm(hidden_dim)
-        self.dropout = nn.Dropout(dropout)
-
-        self.fc = nn.Linear(hidden_dim, embedding_dim)
-
-    def forward(self, x, edge_index, batch=None):
-        x = F.relu(self.gc1(x, edge_index))
-        x = self.graph_norm(x)
-        x = self.layer_norm(x)
-        x = self.dropout(x)
-
-        x = F.relu(self.gc2(x, edge_index))
-        x = self.graph_norm(x)
-        x = self.layer_norm(x)
-        x = self.dropout(x)
-
-        # Пулинг по графу
-        if self.pooling == "max":
-            x = global_max_pool(x, batch)
-        elif self.pooling == "mean":
-            x = global_mean_pool(x, batch)
-        elif self.pooling == "sum":
-            x = global_add_pool(x, batch)
-        else:
-            raise ValueError("Unsupported pooling method. Use 'max', 'mean' or 'sum'.")
-
-        x = self.fc(x)
-
-        if self.embedding_dim == 1:
-            x = torch.sigmoid(x)
-        return x
-
-
-class GCN(nn.Module):
-    def __init__(self, input_dim, output_dim=16, dropout=0.5, pooling="max"):
-        super(GCN, self).__init__()
-
-        self.input_dim = input_dim
-        self.output_dim = output_dim
-        self.hidden_dim = 64  # базовая размерность скрытого слоя
-
-        self.gc1 = GCNConv(input_dim, self.hidden_dim)
-        self.gc2 = GCNConv(self.hidden_dim, 256)
-        self.gc3 = GCNConv(256, 512)
-        self.gc4 = GCNConv(512, self.hidden_dim)
-
-        self.residual_proj = (
-            nn.Linear(input_dim, self.hidden_dim)
-            if input_dim != self.hidden_dim
-            else nn.Identity()
-        )
-
-        self.layer_norm = nn.LayerNorm(self.hidden_dim)
-        self.dropout = nn.Dropout(dropout)
-        self.pooling = pooling
-
-        self.fc1 = nn.Linear(self.hidden_dim, self.hidden_dim)
-        self.fc_norm = nn.LayerNorm(self.hidden_dim)
-        self.fc2 = nn.Linear(self.hidden_dim, output_dim)
-
-    def forward(self, x, edge_index, batch=None):
-        residual = self.residual_proj(x)
-
-        x = F.leaky_relu(self.gc1(x, edge_index))
-        x = self.dropout(x)
-
-        x = F.leaky_relu(self.gc2(x, edge_index))
-        x = self.dropout(x)
-
-        x = F.leaky_relu(self.gc3(x, edge_index))
-        x = self.dropout(x)
-
-        x = F.leaky_relu(self.gc4(x, edge_index))
-        x = self.dropout(x)
-
-        x = self.layer_norm(x + residual)
-
-        # Используем global pooling в зависимости от выбранного метода
-        if self.pooling == "max":
-            x = global_max_pool(x, batch)
-        elif self.pooling == "mean":
-            x = global_mean_pool(x, batch)
-        elif self.pooling == "sum":
-            x = global_add_pool(x, batch)
-        else:
-            raise ValueError("Unsupported pooling method. Use 'max', 'mean' or 'sum'.")
-
-        x = self.fc1(x)
-        x = self.fc_norm(x)
-        x = F.leaky_relu(x)
-        x = self.fc2(x)
-
-        if self.output_dim == 1:
-            x = torch.sigmoid(x)
-        return x
 
 class GATBlock(nn.Module):
     """
