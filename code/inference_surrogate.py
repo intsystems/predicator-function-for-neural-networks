@@ -26,7 +26,13 @@ import sys
 
 sys.path.insert(1, "../dependencies")
 
-from dependencies.GCN import GAT, CustomDataset, collate_graphs, extract_embeddings
+from dependencies.GCN import (
+    GAT_ver_1,
+    GAT_ver_2,
+    CustomDataset,
+    collate_graphs,
+    extract_embeddings,
+)
 from dependencies.data_generator import (
     generate_arch_dicts,
     mutate_architectures,
@@ -44,7 +50,7 @@ class InferSurrogate:
         self.dataset_path = Path(self.config.surrogate_inference_path)
 
     def initialize_models(self):
-        self.config.model_accuracy = GAT(
+        self.config.model_accuracy = GAT_ver_1(
             input_dim=self.config.input_dim,
             output_dim=1,
             dropout=self.config.acc_dropout,
@@ -58,7 +64,7 @@ class InferSurrogate:
         self.config.model_accuracy.load_state_dict(state_dict)
         self.config.model_accuracy.eval()
 
-        self.config.model_diversity = GAT(
+        self.config.model_diversity = GAT_ver_2(
             input_dim=self.config.input_dim,
             output_dim=self.config.div_output_dim,
             dropout=self.config.div_dropout,
@@ -74,9 +80,8 @@ class InferSurrogate:
 
     def _get_score(self, accuracy, dist):
         return (
-            (1 - self.config.acc_distance_gamma) * accuracy / 100
-            + self.config.acc_distance_gamma * dist
-        )
+            1 - self.config.acc_distance_gamma
+        ) * accuracy / 100 + self.config.acc_distance_gamma * dist
 
     def _find_dist_to_best(self, best_embs, emb):
         """
@@ -161,7 +166,7 @@ class InferSurrogate:
                 f"Adding model {i+1}/{self.config.n_ensemble_models} with score = {models_with_scores[i][4]:.2f}, accuracy = {models_with_scores[i][2]:.2f}"
             )
 
-    def select_central_models_by_clusters(self, n_near_centroid=1):
+    def select_central_models_by_clusters(self, n_near_centroid=1, draw_tsne=True):
 
         X = np.array(self.config.potential_embeddings, dtype=np.float32)
         accs = np.array(self.config.potential_accuracies, dtype=np.float32)
@@ -200,7 +205,8 @@ class InferSurrogate:
                 self.config.selected_accs.append(accs[best_global])
                 self.config.selected_indices.append(best_global)
 
-        self.paint_tsne(X, centroids, cluster_ids)
+        if draw_tsne:
+            self.paint_tsne(X, centroids, cluster_ids)
 
     def random_choice_out_of_best(self):
         X = np.array(self.config.potential_embeddings, dtype=np.float32)
@@ -256,57 +262,48 @@ class InferSurrogate:
 
     def _select_top_diverse_models(self, acc_embs, div_embs):
         n_models = len(acc_embs)
-        n_keep = min(self.config.n_ensemble_models * 20, len(acc_embs))
+        n_keep = min(self.config.n_ensemble_models * 20, n_models)
 
         acc_embs = np.array(acc_embs)
         div_embs = np.array(div_embs)
 
-        selected_idxs = [np.argmax(acc_embs)]
-        remaining_idxs = list(set(range(n_models)) - set(selected_idxs))
+        first_idx = int(np.argmax(acc_embs))
+        selected_idxs = [first_idx]
+        remaining_idxs = set(range(n_models)) - {first_idx}
 
         scores = [0.0]
+        accs = [acc_embs[first_idx]]
+        dists = [0.0]
 
         while len(selected_idxs) < n_keep:
-            best_score = -np.inf
-            best_idx = None
+            best_idx, best_score = None, -np.inf
 
             for idx in remaining_idxs:
-                distances = cdist(
-                    div_embs[[idx]], div_embs[selected_idxs], metric="euclidean"
-                )[0]
+                distances = cdist(div_embs[[idx]], div_embs[selected_idxs], metric="euclidean")[0]
                 mean_dist = distances.mean()
                 score = self._get_score(acc_embs[idx], mean_dist)
 
                 if score > best_score:
-                    best_score = score
-                    best_idx = idx
+                    best_score, best_idx = score, idx
+                    best_distance = mean_dist
 
             selected_idxs.append(best_idx)
             scores.append(best_score)
+            accs.append(acc_embs[best_idx])
+            dists.append(best_distance)
             remaining_idxs.remove(best_idx)
 
-        first_idx = selected_idxs[0]
-        other_div_embs = div_embs[selected_idxs[1:]]
-        first_distances = cdist(
-            div_embs[[first_idx]], other_div_embs, metric="euclidean"
-        )[0]
-        first_score = self._get_score(acc_embs[first_idx], first_distances.mean())
-        scores[0] = first_score
+        if len(selected_idxs) > 1:
+            first_distances = cdist(div_embs[[first_idx]], div_embs[selected_idxs[1:]], metric="euclidean")[0]
+            scores[0] = self._get_score(acc_embs[first_idx], first_distances.mean())
+            dists[0] = first_distances.mean()
 
-        self.config.selected_archs = [
-            self.config.selected_archs[i] for i in selected_idxs
-        ]
-        self.config.selected_embs = [
-            self.config.selected_embs[i] for i in selected_idxs
-        ]
-        self.config.selected_accs = [
-            self.config.selected_accs[i] for i in selected_idxs
-        ]
-        self.config.selected_indices = [
-            self.config.selected_indices[i] for i in selected_idxs
-        ]
+        self.config.selected_archs   = [self.config.selected_archs[i]   for i in selected_idxs]
+        self.config.selected_embs    = [self.config.selected_embs[i]    for i in selected_idxs]
+        self.config.selected_accs    = [self.config.selected_accs[i]    for i in selected_idxs]
+        self.config.selected_indices = [self.config.selected_indices[i] for i in selected_idxs]
 
-        return scores
+        return scores, accs, dists
 
     def greedy_choice_out_of_best(self):
         tmp_dir = Path(self.config.tmp_archs_path)
@@ -332,11 +329,13 @@ class InferSurrogate:
                 self.config.potential_accuracies.append(acc)
 
             if len(ensemble_list) == 0:
-                self.select_central_models_by_clusters()
+                self.select_central_models_by_clusters(draw_tsne=False)
                 best_model = self.config.selected_archs[0]
                 ensemble_list.append(best_model)
             else:
-                self.select_central_models_by_clusters(n_near_centroid=10)
+                self.select_central_models_by_clusters(
+                    n_near_centroid=10, draw_tsne=False
+                )
 
                 _, emb_acc_np, emb_div_np = self._get_embeddings(
                     tmp_dir, self.config.selected_archs
@@ -351,12 +350,14 @@ class InferSurrogate:
                     tmp_archs.extend(ensemble_list)
                     continue
 
-                scores = self._select_top_diverse_models(emb_acc_np, emb_div_np)
+                scores, accs, dists = self._select_top_diverse_models(emb_acc_np, emb_div_np)
 
                 for idx, score in enumerate(scores):
                     if score >= self.config.min_acc_and_div_to_ensemble:
                         print(
-                            f"Adding model {len(ensemble_list) + 1}/{self.config.n_ensemble_models} with score = {score:.2f}"
+                            f"Adding model {len(ensemble_list) + 1}/{self.config.n_ensemble_models} with score = {score:.2f}, "
+                            f"accuracy = {accs[idx] / 100:.2f}, "
+                            f"distance = {dists[idx]:.2f}"
                         )
                         ensemble_list.append(self.config.selected_archs[idx])
                         if len(ensemble_list) >= self.config.n_ensemble_models:
