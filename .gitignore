@@ -25,6 +25,7 @@ code/start_all_dev.sh
 code/inference_test.sh
 code/surrogate_test.sh
 code/train_test.sh
+.vscode
 
 
 *.zip

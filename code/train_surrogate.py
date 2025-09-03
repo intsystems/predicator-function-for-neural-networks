@@ -263,7 +263,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     params = json.loads(Path(args.hyperparameters_json).read_text())
-    params.update({"device": "cuda" if torch.cuda.is_available() else "cpu"})
+    # params.update({"device": "cuda" if torch.cuda.is_available() else "cpu"})
     config = TrainConfig(**params)
 
     trainer = SurrogateTrainer(config)

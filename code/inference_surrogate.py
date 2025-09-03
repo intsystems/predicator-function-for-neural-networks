@@ -1,7 +1,10 @@
+import os
+os.environ["OPENBLAS_NUM_THREADS"] = "4"  
+os.environ["OMP_NUM_THREADS"] = "1"       
+os.environ["MKL_NUM_THREADS"] = "1" 
 import numpy as np
 import torch
 import torch.nn.functional as F
-import os
 import json
 import argparse
 import shutil
@@ -39,8 +42,6 @@ from dependencies.data_generator import (
     load_dataset_on_inference,
 )
 from dependencies.train_config import TrainConfig
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class InferSurrogate:
@@ -130,7 +131,7 @@ class InferSurrogate:
 
         torch.cuda.empty_cache()
         gc.collect()
-        shutil.rmtree(tmp_dir, ignore_errors=True)
+        # shutil.rmtree(tmp_dir, ignore_errors=True)
 
     def select_models_only_score(self, n_dist_calc=10):
         models_with_scores = []
@@ -231,17 +232,22 @@ class InferSurrogate:
             self.config.selected_indices = []
 
     def _get_embeddings(self, path_dir, archs):
-        shutil.rmtree(path_dir, ignore_errors=True)
         path_dir.mkdir(parents=True, exist_ok=True)
-
+        
+        existing_files = list(path_dir.glob("arch_*.json"))
+        existing_indices = [int(f.stem.split('_')[1]) for f in existing_files]
+        next_index = max(existing_indices) + 1 if existing_indices else 0
+        
         arch_paths = []
         for i, arch in enumerate(archs):
-            path = path_dir / f"arch_{len(os.listdir(path_dir)) + i}.json"
+            path = path_dir / f"arch_{next_index + i}.json"
             with path.open("w", encoding="utf-8") as f:
                 json.dump(arch, f)
             arch_paths.append(path)
-
-        dataset = CustomDataset(arch_paths, use_tqdm=True)
+        
+        all_paths = existing_files + arch_paths
+        
+        dataset = CustomDataset(all_paths, use_tqdm=True)
         loader = DataLoader(
             dataset,
             batch_size=self.config.batch_size_inference,
@@ -252,13 +258,13 @@ class InferSurrogate:
 
         with torch.no_grad():
             emb_acc_np, _ = extract_embeddings(
-                self.config.model_accuracy, loader, device, use_tqdm=True
+                self.config.model_accuracy, loader, self.device, use_tqdm=True
             )
             emb_div_np, _ = extract_embeddings(
-                self.config.model_diversity, loader, device, use_tqdm=True
+                self.config.model_diversity, loader, self.device, use_tqdm=True
             )
 
-        return arch_paths, emb_acc_np, emb_div_np
+        return all_paths, emb_acc_np, emb_div_np
 
     def _select_top_diverse_models(self, acc_embs, div_embs):
         n_models = len(acc_embs)
@@ -370,7 +376,7 @@ class InferSurrogate:
             )
             tmp_archs.extend(ensemble_list)
 
-        shutil.rmtree(tmp_dir, ignore_errors=True)
+        # shutil.rmtree(tmp_dir, ignore_errors=True)
         self.config.selected_archs = ensemble_list
 
     def paint_tsne(self, X, centroids, cluster_ids):
@@ -475,7 +481,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     params = json.loads(Path(args.hyperparameters_json).read_text())
-    params.update({"device": "cuda" if torch.cuda.is_available() else "cpu"})
+    # params.update({"device": "cuda" if torch.cuda.is_available() else "cpu"})
     config = TrainConfig(**params)
 
     inference = InferSurrogate(config)

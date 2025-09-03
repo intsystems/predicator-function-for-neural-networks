@@ -17,6 +17,8 @@ from nni.nas.evaluator.pytorch import DataLoader, Lightning, Trainer
 from nni.nas.space import model_context
 from tqdm import tqdm
 
+from multiprocessing import Process 
+
 from utils_nni.DartsSpace import DARTS_with_CIFAR100 as DartsSpace
 from dependencies.darts_classification_module import DartsClassificationModule
 from dependencies.train_config import TrainConfig
@@ -91,7 +93,6 @@ class DiversityNESRunner:
     def __init__(self, config: TrainConfig, info: DatasetsInfo):
         self.config = config
         self.models = []
-        self.model_id = 1
         self.dataset_key = info["key"]
         self.dataset_cls = info["class"]
         self.num_classes = info["num_classes"]
@@ -191,34 +192,24 @@ class DiversityNESRunner:
             if module.bias is not None:
                 torch.nn.init.zeros_(module.bias)
 
-    def train_model(
-        self,
-        architecture: dict,
-        train_loader: DataLoader,
-        valid_loader: DataLoader,
-        model_id: int,
-        save_dir_name="trained_models_pth",
-        weight_init_seed=None,
-    ) -> torch.nn.Module:
-        """
-        Train a single model defined by architecture and return the trained model.
-        """
+    def train_model(self, architecture: dict, train_loader, valid_loader, model_id) -> torch.nn.Module:
+        seed = self.config.seed + model_id
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+
         try:
-            dataset = self.dataset_key
             with model_context(architecture):
                 model = DartsSpace(
                     width=self.config.width,
                     num_cells=self.config.num_cells,
-                    dataset=dataset,
+                    dataset=self.dataset_key,
                 )
 
-            if weight_init_seed:
-                torch.manual_seed(weight_init_seed)
-                model.apply(self._custom_weight_init)
-            model.to(self.device)
-
-            devices_arg = 1 if self.device.type == "cuda" else "auto"
-            accelerator = "gpu" if self.device.type == "cuda" else "cpu"
+            model = model.to(self.device)
+            model.apply(self._custom_weight_init)
 
             evaluator = Lightning(
                 DartsClassificationModule(
@@ -233,54 +224,38 @@ class DiversityNESRunner:
                     gradient_clip_val=5.0,
                     max_epochs=self.config.n_epochs_final,
                     fast_dev_run=self.config.developer_mode,
-                    accelerator=accelerator,
-                    devices=devices_arg,
+                    accelerator="gpu" if self.device.type == "cuda" else "cpu",
+                    devices=1,
+                    strategy="auto",
                     enable_progress_bar=True,
                 ),
                 train_dataloaders=train_loader,
                 val_dataloaders=valid_loader,
             )
             evaluator.fit(model)
-            self.models.append(model)
 
-            os.makedirs(Path(self.config.output_path) / save_dir_name, exist_ok=True)
-            print(
-                f"Saving model {model_id} to {self.config.output_path} {save_dir_name}"
-            )
-            torch.save(
-                model.state_dict(),
-                Path(self.config.output_path) / save_dir_name / f"model_{model_id}.pth",
-            )
+            # Убедимся, что модель на нужном устройстве
+            model = model.to(self.device)
+
+            # === Гарантированно создаём папку (на всякий случай) ===
+            save_path = Path(self.config.output_path) / "trained_models_pth"
+            save_path.mkdir(parents=True, exist_ok=True)  # теперь безопасно
+
+            model_path = save_path / f"model_{model_id}.pth"
+            torch.save(model.state_dict(), model_path)
+            print(f"Model {model_id} saved to {model_path}")
 
             return model
 
         except Exception as e:
             print(f"Error training model {model_id}: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return None
 
-    def evaluate_and_save_results(
-        self,
-        model,
-        architecture,
-        valid_loader,
-        folder_name="results_dataset",
-        mode="class"
-    ):
-        """
-        Оценивает модель на валидационном наборе данных и сохраняет результаты в JSON.
-        Аргументы:
-        model: Обученная модель
-        architecture: Архитектура модели
-        valid_loader (DataLoader): DataLoader для валидационных данных
-        model_id: Уникальный идентификатор модели
-        folder_name (str): Папка для сохранения результатов
-        mode (str): Тип оценки ("class" или "logits")
-        """
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        os.makedirs(folder_name, exist_ok=True)
 
-        # Перенос модели на устройство и режим оценки
-        model.to(device)
+    def evaluate_and_save_results(self, model, architecture, valid_loader, folder_name, mode="class", model_id=None):
+        device = next(model.parameters()).device
         model.eval()
 
         valid_correct = 0
@@ -300,28 +275,24 @@ class DiversityNESRunner:
                 else:
                     valid_preds.extend(predicted.cpu().tolist())
 
-                if self.config.developer_mode:
-                    break
-
         valid_accuracy = valid_correct / valid_total
 
-        # Формирование результата
         result = {
             "architecture": architecture,
             "valid_predictions": valid_preds,
             "valid_accuracy": valid_accuracy,
         }
 
-        # Генерация имени файла с использованием model_id
-        file_name = f"model_{self.model_id:d}.json"
+        # Используем переданный model_id, а не self.model_id
+        file_name = f"model_{model_id}.json"
         file_path = os.path.join(folder_name, file_name)
 
-        # Сохранение результатов
+        os.makedirs(folder_name, exist_ok=True)
         with open(file_path, "w") as f:
             json.dump(result, f, indent=4)
 
-        print(f"Results for model_{self.model_id} saved to {file_path}")
-        self.model_id += 1
+        print(f"Results for model_{model_id} saved to {file_path}")
+        # Не меняем self.model_id — он не нужен
 
     def collect_ensemble_stats(self, test_loader):
         if not hasattr(self, "models") or not self.models:
@@ -468,53 +439,74 @@ class DiversityNESRunner:
         if not indices:
             raise ValueError("No valid indices found in models_json_* directories")
 
-        return max(indices)
+            return max(indices)
+    @staticmethod
+    def train_single_model_process(architecture, model_id, gpu_id, config, dataset_key, num_classes):
+        # Устанавливаем видимые GPU
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+        
+        # Теперь CUDA доступна?
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        print(f"[Process {model_id}] Using device: {device}")
+
+        # Создаём runner
+        runner = DiversityNESRunner(config, DatasetsInfo.get(config.dataset_name.lower()))
+        
+        # Получаем dataloaders — они будут на CPU
+        train_loader, valid_loader, test_loader = runner.get_data_loaders()
+
+        # Обучаем модель
+        model = runner.train_model(architecture, train_loader, valid_loader, model_id)
+        
+        if model is not None:
+            # Критически важно: убедиться, что модель на GPU
+            model = model.to(device)
+            
+            # Оценка — тоже на правильном устройстве
+        runner.evaluate_and_save_results(
+            model,
+            architecture,
+            valid_loader,
+            folder_name=config.output_path + "/trained_models_archs/",
+            model_id=model_id
+        )
+        
+        print(f"[Process {model_id}] Done on GPU {gpu_id}")
+
 
     def run(self):
-        """
-        Main pipeline: load architectures, load data, train and evaluate all models.
-        """
-        if not Path(self.config.best_models_save_path).exists():
-            raise FileNotFoundError(
-                f"Architecture directory {self.config.best_models_save_path} not found"
-            )
+        print("Loading architectures...")
         if self.config.evaluate_ensemble_flag:
-            print("Loading architecture definitions...")
-            latest_index = self.get_latest_index_from_dir(Path(self.config.best_models_save_path))
-            models_json_dir = Path(self.config.best_models_save_path) / f"models_json_{latest_index}" #loading best models to evaluate ensemble
+            latest_index = self.get_latest_index_from_dir()
+            models_json_dir = Path(self.config.best_models_save_path) / f"models_json_{latest_index}"
             arch_dicts = load_json_from_directory(models_json_dir)
-            if not arch_dicts:
-                raise RuntimeError(
-                    "No valid architectures found in the specified directory"
-                )
         else:
-            arch_dicts = generate_arch_dicts(self.config.n_models_to_evaluate) #generating dataset of models for surrogate
+            arch_dicts = generate_arch_dicts(self.config.n_models_to_evaluate)
 
-        print("Creating data loaders...")
-        train_loader, valid_loader, test_loader = self.get_data_loaders() # if evaluating ensemble, then val_loader is None
-
-        print(f"Starting training for {len(arch_dicts)} models...")
         archs = [d["architecture"] for d in arch_dicts]
+        n_gpus = torch.cuda.device_count()
 
-        for idx, arch in enumerate(tqdm(archs, desc="Training models")):
-            print(f"\nTraining model {idx+1}/{len(archs)}")
-            model = self.train_model(arch, train_loader, valid_loader, idx)
-            
-            if not self.config.evaluate_ensemble_flag:
-                self.models = []  # Doesn't need to save models in prepare dataset mode
-                self.evaluate_and_save_results(
-                    model,
-                    arch,
-                    valid_loader,
-                    self.config.output_path + "/trained_models_archs/",
-                )
+        # === СОЗДАЁМ ВСЕ ПАПКИ ЗАРАНЕЕ ===
+        output_path = Path(self.config.output_path)
+        (output_path / "trained_models_pth").mkdir(parents=True, exist_ok=True)
+        (output_path / "trained_models_archs").mkdir(parents=True, exist_ok=True)
 
-        if self.config.evaluate_ensemble_flag:
-            print("\nEvaluating ensemble...")
-            stats = self.collect_ensemble_stats(test_loader)
-            self.finalize_ensemble_evaluation(stats, "ensemble_results")
+        print(f"Created output directories in {output_path}")
 
-        print("\nAll models processed successfully!")
+        processes = []
+        for idx, arch in enumerate(archs):
+            gpu_id = idx % n_gpus
+            p = Process(target=self.train_single_model_process, args=(
+                arch, idx, gpu_id, self.config, self.dataset_key, self.num_classes
+            ))
+            p.start()
+            processes.append(p)
+
+        for p in processes:
+            p.join()
+
+        print("All models trained!")
+
 
     def run_all_pretrained(self):
         """
