@@ -12,6 +12,7 @@ from pathlib import Path
 import gc
 import random
 import re
+from typing import List, Dict, Tuple, Any
 
 from torch_geometric.utils import dense_to_sparse
 import matplotlib.pyplot as plt
@@ -45,209 +46,317 @@ from dependencies.train_config import TrainConfig
 
 
 class InferSurrogate:
-    def __init__(self, config) -> None:
+    """
+    Класс для поиска и выбора архитектур нейронных сетей для ансамбля
+    с использованием суррогатных моделей для предсказания точности и разнообразия.
+    """
+
+    def __init__(self, config: Any) -> None:
         self.config = config
         self.device = torch.device(self.config.device)
-        self.dataset_path = Path(self.config.surrogate_inference_path)
+        self.surrogate_dataset_path = Path(self.config.surrogate_inference_path)
+        self.tmp_dir = Path(self.config.tmp_archs_path)
 
-    def initialize_models(self):
-        self.config.model_accuracy = GAT_ver_1(
+        self._clear_all_buffers()
+
+    # --------------------------------------------------------------------------
+    # 1. Публичные методы (API класса)
+    # --------------------------------------------------------------------------
+
+    def initialize_models(self) -> None:
+        """Загружает и инициализирует суррогатные модели для точности и разнообразия."""
+        print("Initializing surrogate models...")
+        self.model_accuracy = GAT_ver_1(
             input_dim=self.config.input_dim,
             output_dim=1,
             dropout=self.config.acc_dropout,
             heads=self.config.acc_n_heads,
         ).to(self.device)
-        state_dict = torch.load(
-            self.dataset_path / "model_accuracy.pth",
+        state_dict_acc = torch.load(
+            self.surrogate_dataset_path / "model_accuracy.pth",
             map_location=self.device,
             weights_only=True,
         )
-        self.config.model_accuracy.load_state_dict(state_dict)
-        self.config.model_accuracy.eval()
+        self.model_accuracy.load_state_dict(state_dict_acc)
+        self.model_accuracy.eval()
 
-        self.config.model_diversity = GAT_ver_2(
+        self.model_diversity = GAT_ver_2(
             input_dim=self.config.input_dim,
             output_dim=self.config.div_output_dim,
             dropout=self.config.div_dropout,
             heads=self.config.div_n_heads,
         ).to(self.device)
-        state_dict = torch.load(
-            self.dataset_path / "model_diversity.pth",
+        state_dict_div = torch.load(
+            self.surrogate_dataset_path / "model_diversity.pth",
             map_location=self.device,
             weights_only=True,
         )
-        self.config.model_diversity.load_state_dict(state_dict)
-        self.config.model_diversity.eval()
+        self.model_diversity.load_state_dict(state_dict_div)
+        self.model_diversity.eval()
+        print("Surrogate models loaded successfully.")
 
-    def _get_score(self, accuracy, dist):
-        return (
-            1 - self.config.acc_distance_gamma
-        ) * accuracy / 100 + self.config.acc_distance_gamma * dist
-
-    def _find_dist_to_best(self, best_embs, emb):
+    def run_selection(self, strategy: str = "greedy_forward") -> None:
         """
-        best_embs: tensor [k, d], emb: tensor [d] или [1, d]
-        возвращает min расстояние от emb до любого из best_embs
+        Основной метод, запускающий процесс отбора моделей для ансамбля.
+
+        Args:
+            strategy (str): Стратегия отбора моделей.
+                - 'greedy_forward': Жадный итеративный отбор с учетом точности и разнообразия.
+                - 'cluster': Отбор моделей, ближайших к центроидам кластеров.
+                - 'random': Случайный отбор.
         """
-        if best_embs.numel() == 0:
-            return float("inf")
-        dists = torch.cdist(emb.unsqueeze(0), best_embs, p=2)  # [1, k]
-        return dists.min().item()
+        self._clear_all_buffers()
+        
+        # Шаг 1: Подготовка пула потенциальных моделей
+        self._prepare_potential_models()
+        if not self.potential_archs:
+            print("Error: No potential models found after filtering. Can't select an ensemble.")
+            return
 
-    def architecture_search(self):
-        tmp_dir = Path(self.config.tmp_archs_path)
-
-        if self.config.use_pretrained_models_for_ensemble:
-            load_dataset_on_inference(self.config)
-            arch_dicts = []
-            for arch_json in tqdm(self.config.models_dict_path, desc="Deleting keys"):
-                arch = json.loads(arch_json.read_text(encoding="utf-8"))
-                for key in (
-                    "test_predictions",
-                    "test_accuracy",
-                    "valid_predictions",
-                    "valid_accuracy",
-                ):
-                    arch.pop(key, None)
-                arch["id"] = int(re.search(r"model_(\d+)", str(arch_json)).group(1))
-                arch_dicts.append(arch)
-        else:
-            arch_dicts = generate_arch_dicts(
-                self.config.n_models_to_generate, use_tqdm=True
+        # Шаг 2: Выбор моделей в соответствии с выбранной стратегией
+        print(f"\n--- Running selection with '{strategy}' strategy ---")
+        n_select = self.config.n_ensemble_models
+        
+        if strategy == "greedy_forward":
+            selected_archs = self.greedy_forward_selection(
+                self.potential_archs,
+                self.potential_accuracies,
+                self.potential_embeddings,
+                n_select,
             )
-
-        arch_paths, emb_acc_np, emb_div_np = self._get_embeddings(tmp_dir, arch_dicts)
-
-        mask = emb_acc_np >= self.config.min_accuracy_for_pool
-        valid_paths = [p for p, ok in zip(arch_paths, mask) if ok]
-        valid_div_embs = emb_div_np[mask].astype(np.float16)
-        valid_accs = emb_acc_np[mask]
-
-        for path, emb, acc in zip(valid_paths, valid_div_embs, valid_accs):
-            arch = json.loads(path.read_text(encoding="utf-8"))
-            self.config.potential_archs.append(arch)
-            self.config.potential_embeddings.append(emb)
-            self.config.potential_accuracies.append(acc)
-
-        torch.cuda.empty_cache()
-        gc.collect()
-        # shutil.rmtree(tmp_dir, ignore_errors=True)
-
-    def select_models_only_score(self, n_dist_calc=10):
-        models_with_scores = []
-
-        for idx, (arch, emb, acc) in enumerate(
-            tqdm(
-                zip(
-                    self.config.potential_archs,
-                    self.config.potential_embeddings,
-                    self.config.potential_accuracies,
-                ),
-                desc="Calculating scores",
+        elif strategy == "cluster":
+            selected_archs, _, selected_indices = self.select_by_clusters(
+                self.potential_archs,
+                self.potential_embeddings,
+                n_select,
+                n_near_centroid=1
             )
-        ):
-            neighbors = np.array(
-                random.choices(
-                    self.config.potential_embeddings,
-                    k=n_dist_calc,
+            # Опционально: нарисовать t-SNE
+            if self.config.draw_tsne:
+                 self.paint_tsne(
+                    self.potential_embeddings, 
+                    self.potential_accuracies, # Передаем accs для полной картины
+                    selected_indices
                 )
-            )
-            dist = np.mean(np.linalg.norm(neighbors - emb, axis=1))
-            score = self._get_score(acc, dist)
-            models_with_scores.append((arch, emb, acc, idx, score))
+        elif strategy == "random":
+            selected_archs = self.select_randomly(self.potential_archs, n_select)
+        else:
+            raise ValueError(f"Unknown selection strategy: {strategy}")
 
-        models_with_scores.sort(key=lambda x: x[4], reverse=True)
+        self.selected_archs = selected_archs
+        print(f"\n--- Selection finished. Total models in ensemble: {len(self.selected_archs)} ---")
 
-        for i in range(self.config.n_ensemble_models):
-            self.config.selected_archs.append(models_with_scores[i][0])
-            self.config.selected_embs.append(models_with_scores[i][1])
-            self.config.selected_accs.append(models_with_scores[i][2])
-            self.config.selected_indices.append(models_with_scores[i][3])
-            print(
-                f"Adding model {i+1}/{self.config.n_ensemble_models} with score = {models_with_scores[i][4]:.2f}, accuracy = {models_with_scores[i][2]:.2f}"
-            )
+    def save_models(self, cleanup_tmp: bool = True) -> None:
+        """Сохраняет выбранные архитектуры ансамбля в JSON-файлы."""
+        if not self.selected_archs:
+            print("Warning: No models were selected, nothing to save.")
+            return
 
-    def select_central_models_by_clusters(self, n_near_centroid=1, draw_tsne=True):
+        base_save_path = Path(self.config.best_models_save_path)
+        base_save_path.mkdir(parents=True, exist_ok=True)
+        
+        # Найти следующий доступный индекс для папки, чтобы не перезаписать старые результаты
+        existing_dirs = base_save_path.glob("models_json_*")
+        indices = [int(re.search(r"(\d+)", p.name).group(1)) for p in existing_dirs if re.search(r"(\d+)", p.name)]
+        next_index = max(indices, default=0) + 1
+        
+        models_json_dir = base_save_path / f"models_json_{next_index}"
+        models_json_dir.mkdir()
+        print(f"Saving selected models to: {models_json_dir}")
 
-        X = np.array(self.config.potential_embeddings, dtype=np.float32)
-        accs = np.array(self.config.potential_accuracies, dtype=np.float32)
+        for i, arch in enumerate(self.selected_archs):
+            # Имя файла на основе ID или простого индекса
+            model_id = arch.get("id")
+            file_name = f"model_{model_id}.json" if model_id is not None else f"generated_model_{i+1}.json"
+            file_path = models_json_dir / file_name
+            with file_path.open("w", encoding="utf-8") as f:
+                json.dump(arch, f, indent=4)
+        
+        print(f"Successfully saved {len(self.selected_archs)} model architectures.")
+        
+        if cleanup_tmp:
+            shutil.rmtree(self.tmp_dir, ignore_errors=True)
+            print("Temporary directory cleaned up.")
 
-        kmeans = KMeans(
-            n_clusters=self.config.n_ensemble_models,
-            random_state=self.config.seed,
-            n_init=10,
+    # --------------------------------------------------------------------------
+    # 2. Стратегии отбора моделей (теперь они stateless)
+    # --------------------------------------------------------------------------
+    def greedy_forward_selection(
+        self,
+        archs: List[Dict],
+        accs: np.ndarray,
+        embs: np.ndarray,
+        n_select: int,
+    ) -> List[Dict]:
+        """
+        Жадный итеративный отбор (Forward Selection).
+        1. Выбирает первую модель с максимальной точностью.
+        2. Итеративно добавляет модели, которые максимизируют score(точность, разнообразие).
+        """
+        if len(archs) < n_select:
+            print(f"Warning: Not enough candidates ({len(archs)}) to select {n_select}. Returning all candidates.")
+            return archs
+            
+        candidate_accs = torch.from_numpy(accs).to(self.device).float()
+        candidate_embs = torch.from_numpy(embs).to(self.device).float()
+        candidate_archs = list(archs)
+
+        # Шаг 1: Выбрать первую модель с наилучшей точностью
+        best_first_idx = torch.argmax(candidate_accs).item()
+        
+        ensemble_archs = [candidate_archs.pop(best_first_idx)]
+        ensemble_embs = [candidate_embs[best_first_idx]]
+        # Для логирования можно также хранить точности
+        ensemble_accs = [candidate_accs[best_first_idx]]
+        
+        
+        print(
+            f"Adding model 1/{n_select} with best accuracy = {ensemble_accs[0].item() / 100:.2f}"
         )
-        cluster_ids = kmeans.fit_predict(X)
+        
+        candidate_accs = torch.cat([candidate_accs[:best_first_idx], candidate_accs[best_first_idx+1:]])
+        candidate_embs = torch.cat([candidate_embs[:best_first_idx], candidate_embs[best_first_idx+1:]])
+        
+        while len(ensemble_archs) < n_select and len(candidate_archs) > 0:
+            current_ensemble_embs = torch.stack(ensemble_embs)
+            
+            dists = torch.cdist(candidate_embs, current_ensemble_embs)
+            mean_dists = dists.mean(dim=1)
+            
+            scores = self._get_score(candidate_accs, mean_dists)
+            
+            best_idx = torch.argmax(scores).item()
+            
+            print(
+                f"Adding model {len(ensemble_archs) + 1}/{n_select} with "
+                f"score = {scores[best_idx].item():.2f}, "
+                f"accuracy = {candidate_accs[best_idx].item() / 100:.2f}, "
+                f"mean_dist = {mean_dists[best_idx].item():.2f}"
+            )
+            
+            ensemble_archs.append(candidate_archs.pop(best_idx))
+            ensemble_embs.append(candidate_embs[best_idx])
+            ensemble_accs.append(candidate_accs[best_idx])
+            
+            candidate_accs = torch.cat([candidate_accs[:best_idx], candidate_accs[best_idx+1:]])
+            candidate_embs = torch.cat([candidate_embs[:best_idx], candidate_embs[best_idx+1:]])
+
+        return ensemble_archs
+
+    def select_by_clusters(
+        self,
+        archs: List[Dict],
+        embs: np.ndarray,
+        n_clusters: int,
+        n_near_centroid: int = 1
+    ) -> Tuple[List[Dict], List[np.ndarray], List[int]]:
+        """
+        Выбирает модели, которые наиболее близки к центроидам кластеров.
+        """
+        kmeans = KMeans(n_clusters=n_clusters, random_state=self.config.seed, n_init=10)
+        cluster_ids = kmeans.fit_predict(embs)
         centroids = kmeans.cluster_centers_
 
-        self.config.selected_archs = []
-        self.config.selected_embs = []
-        self.config.selected_accs = []
-        self.config.selected_indices = []
+        selected_archs, selected_embs, selected_indices = [], [], []
 
-        for cluster_id in range(self.config.n_ensemble_models):
-            idxs = np.where(cluster_ids == cluster_id)[0]
-            if idxs.size == 0:
+        for cluster_id in range(n_clusters):
+            # Находим индексы всех точек в данном кластере
+            idxs_in_cluster = np.where(cluster_ids == cluster_id)[0]
+            if idxs_in_cluster.size == 0:
+                print(f"Warning: Cluster {cluster_id} is empty.")
                 continue
 
-            cluster_X = X[idxs]
-            centroid = centroids[cluster_id]
-
-            dists = np.linalg.norm(cluster_X - centroid, axis=1)
-            sorted_local = np.argsort(dists)[:n_near_centroid]
-
-            for local_best in sorted_local:
-                best_global = idxs[local_best]
-
-                self.config.selected_archs.append(
-                    self.config.potential_archs[best_global]
+            cluster_embs = embs[idxs_in_cluster]
+            
+            # Вычисляем расстояния до центроида и находим n ближайших
+            dists = np.linalg.norm(cluster_embs - centroids[cluster_id], axis=1)
+            sorted_local_indices = np.argsort(dists)[:n_near_centroid]
+            
+            # Получаем глобальные индексы лучших моделей
+            global_indices = idxs_in_cluster[sorted_local_indices]
+            
+            for global_idx in global_indices:
+                selected_archs.append(archs[global_idx])
+                selected_embs.append(embs[global_idx])
+                selected_indices.append(global_idx)
+                
+                print(
+                    f"Selected model from cluster {cluster_id} "
+                    f"(dist to centroid: {dists[global_idx]:.2f})"
                 )
-                self.config.selected_embs.append(X[best_global])
-                self.config.selected_accs.append(accs[best_global])
-                self.config.selected_indices.append(best_global)
 
-        if draw_tsne:
-            self.paint_tsne(X, centroids, cluster_ids)
+        return selected_archs, selected_embs, selected_indices
 
-    def random_choice_out_of_best(self):
-        X = np.array(self.config.potential_embeddings, dtype=np.float32)
-        accs = np.array(self.config.potential_accuracies, dtype=np.float32)
-
-        for i in range(self.config.n_ensemble_models):
-            chosen = np.random.randint(X.shape[0])
-            self.config.selected_archs.append(self.config.potential_archs[chosen])
-            self.config.selected_embs.append(X[chosen])
-            self.config.selected_accs.append(accs[chosen])
-            self.config.selected_indices.append(chosen)
-
-    def _clear_buffers(self, potential=True, seleceted=True):
-        if potential:
-            self.config.potential_archs = []
-            self.config.potential_embeddings = []
-            self.config.potential_accuracies = []
-        if seleceted:
-            self.config.selected_archs = []
-            self.config.selected_embs = []
-            self.config.selected_accs = []
-            self.config.selected_indices = []
-
-    def _get_embeddings(self, path_dir, archs):
-        path_dir.mkdir(parents=True, exist_ok=True)
+    def select_randomly(self, archs: List[Dict], n_select: int) -> List[Dict]:
+        """Выбирает n_select случайных моделей из предложенного списка."""
+        if len(archs) <= n_select:
+            return archs
         
-        existing_files = list(path_dir.glob("arch_*.json"))
-        existing_indices = [int(f.stem.split('_')[1]) for f in existing_files]
-        next_index = max(existing_indices) + 1 if existing_indices else 0
+        indices = random.sample(range(len(archs)), k=n_select)
+        print(f"Randomly selected {len(indices)} models.")
+        return [archs[i] for i in indices]
+
+    # --------------------------------------------------------------------------
+    # 3. Внутренние (служебные) методы
+    # --------------------------------------------------------------------------
+    
+    def _prepare_potential_models(self) -> None:
+        """
+        Загружает/генерирует архитектуры, вычисляет их эмбеддинги и точности,
+        фильтрует и сохраняет "хороших" кандидатов для дальнейшего отбора.
+        """
+        print("\n--- Preparing potential models pool ---")
         
+        if self.config.use_pretrained_models_for_ensemble:
+            # Логика загрузки готовых моделей
+            load_dataset_on_inference(self.config)
+            initial_archs = []
+            for arch_json_path in tqdm(self.config.models_dict_path, desc="Loading pretrained archs"):
+                arch = json.loads(arch_json_path.read_text(encoding="utf-8"))
+                # Очистка ненужных ключей
+                for key in ("test_predictions", "test_accuracy", "valid_predictions", "valid_accuracy"):
+                    arch.pop(key, None)
+                arch["id"] = int(re.search(r"model_(\d+)", str(arch_json_path)).group(1))
+                initial_archs.append(arch)
+        else:
+            initial_archs = generate_arch_dicts(self.config.n_models_to_generate, use_tqdm=True)
+
+        if not initial_archs:
+            print("Error: No initial architectures were loaded or generated.")
+            return
+
+        archs, accs_np, embs_np = self._get_embeddings(initial_archs)
+        
+        # Шаг 3: Фильтрация по минимальной точности
+        mask = (accs_np / 100)  >= self.config.min_accuracy_for_pool
+        
+        self.potential_archs = [arch for arch, ok in zip(archs, mask) if ok]
+        self.potential_accuracies = accs_np[mask]
+        self.potential_embeddings = embs_np[mask]
+        
+        print(f"Initial pool size: {len(initial_archs)}. "
+              f"After filtering by accuracy >= {self.config.min_accuracy_for_pool}: {len(self.potential_archs)} models.")
+        
+        torch.cuda.empty_cache()
+        gc.collect()
+
+    def _get_embeddings(self, archs: List[Dict]) -> Tuple[List[Dict], np.ndarray, np.ndarray]:
+        """
+        Вычисляет предсказания точности и эмбеддинги разнообразия для списка архитектур.
+        Этот метод всегда работает с чистой временной директорией.
+        """
+        # Очистка и создание временной директории для этого запуска
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
+        self.tmp_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Сохранение архитектур во временные файлы
         arch_paths = []
         for i, arch in enumerate(archs):
-            path = path_dir / f"arch_{next_index + i}.json"
-            with path.open("w", encoding="utf-8") as f:
-                json.dump(arch, f)
+            path = self.tmp_dir / f"arch_{i}.json"
+            path.write_text(json.dumps(arch), encoding="utf-8")
             arch_paths.append(path)
-        
-        all_paths = existing_files + arch_paths
-        
-        dataset = CustomDataset(all_paths, use_tqdm=True)
+            
+        dataset = CustomDataset(arch_paths, use_tqdm=True)
         loader = DataLoader(
             dataset,
             batch_size=self.config.batch_size_inference,
@@ -257,127 +366,36 @@ class InferSurrogate:
         )
 
         with torch.no_grad():
-            emb_acc_np, _ = extract_embeddings(
-                self.config.model_accuracy, loader, self.device, use_tqdm=True
-            )
-            emb_div_np, _ = extract_embeddings(
-                self.config.model_diversity, loader, self.device, use_tqdm=True
-            )
+            print("Extracting accuracy predictions...")
+            emb_acc_np, _ = extract_embeddings(self.model_accuracy, loader, self.device, use_tqdm=True) # Должен возвращать (N, 1)
+            
+            print("Extracting diversity embeddings...")
+            emb_div_np, _ = extract_embeddings(self.model_diversity, loader, self.device, use_tqdm=True) # Должен возвращать (N, D)
 
-        return all_paths, emb_acc_np, emb_div_np
+        return archs, emb_acc_np.flatten(), emb_div_np
 
-    def _select_top_diverse_models(self, acc_embs, div_embs):
-        n_models = len(acc_embs)
-        n_keep = min(self.config.n_ensemble_models * 20, n_models)
+    def _get_score(self, accuracy: torch.Tensor, dist: torch.Tensor) -> torch.Tensor:
+        """
+        Векторизованный расчет "оценки" модели.
 
-        acc_embs = np.array(acc_embs)
-        div_embs = np.array(div_embs)
-
-        first_idx = int(np.argmax(acc_embs))
-        selected_idxs = [first_idx]
-        remaining_idxs = set(range(n_models)) - {first_idx}
-
-        scores = [0.0]
-        accs = [acc_embs[first_idx]]
-        dists = [0.0]
-
-        while len(selected_idxs) < n_keep:
-            best_idx, best_score = None, -np.inf
-
-            for idx in remaining_idxs:
-                distances = cdist(div_embs[[idx]], div_embs[selected_idxs], metric="euclidean")[0]
-                mean_dist = distances.mean()
-                score = self._get_score(acc_embs[idx], mean_dist)
-
-                if score > best_score:
-                    best_score, best_idx = score, idx
-                    best_distance = mean_dist
-
-            selected_idxs.append(best_idx)
-            scores.append(best_score)
-            accs.append(acc_embs[best_idx])
-            dists.append(best_distance)
-            remaining_idxs.remove(best_idx)
-
-        if len(selected_idxs) > 1:
-            first_distances = cdist(div_embs[[first_idx]], div_embs[selected_idxs[1:]], metric="euclidean")[0]
-            scores[0] = self._get_score(acc_embs[first_idx], first_distances.mean())
-            dists[0] = first_distances.mean()
-
-        self.config.selected_archs   = [self.config.selected_archs[i]   for i in selected_idxs]
-        self.config.selected_embs    = [self.config.selected_embs[i]    for i in selected_idxs]
-        self.config.selected_accs    = [self.config.selected_accs[i]    for i in selected_idxs]
-        self.config.selected_indices = [self.config.selected_indices[i] for i in selected_idxs]
-
-        return scores, accs, dists
-
-    def greedy_choice_out_of_best(self):
-        tmp_dir = Path(self.config.tmp_archs_path)
-
-        ensemble_list = []
-        tmp_archs = generate_arch_dicts(self.config.n_models_in_pool)
-        while len(ensemble_list) < self.config.n_ensemble_models:
-            self._clear_buffers()
-
-            arch_paths, emb_acc_np, emb_div_np = self._get_embeddings(
-                tmp_dir, tmp_archs
-            )
-
-            mask = emb_acc_np >= self.config.min_accuracy_for_pool
-            valid_paths = [p for p, ok in zip(arch_paths, mask) if ok]
-            emb_div_np = emb_div_np[mask]
-            emb_acc_np = emb_acc_np[mask]
-
-            for path, emb, acc in zip(valid_paths, emb_div_np, emb_acc_np):
-                arch = json.loads(path.read_text(encoding="utf-8"))
-                self.config.potential_archs.append(arch)
-                self.config.potential_embeddings.append(emb)
-                self.config.potential_accuracies.append(acc)
-
-            if len(ensemble_list) == 0:
-                self.select_central_models_by_clusters(draw_tsne=False)
-                best_model = self.config.selected_archs[0]
-                ensemble_list.append(best_model)
-            else:
-                self.select_central_models_by_clusters(
-                    n_near_centroid=10, draw_tsne=False
-                )
-
-                _, emb_acc_np, emb_div_np = self._get_embeddings(
-                    tmp_dir, self.config.selected_archs
-                )
-
-                if len(emb_acc_np) == 0:  # if no models are above min_accuracy_for_pool
-                    tmp_archs = mutate_architectures(
-                        tmp_archs,
-                        n_mutations=4,
-                        n_out_models=self.config.n_models_to_generate,
-                    )
-                    tmp_archs.extend(ensemble_list)
-                    continue
-
-                scores, accs, dists = self._select_top_diverse_models(emb_acc_np, emb_div_np)
-
-                for idx, score in enumerate(scores):
-                    if score >= self.config.min_acc_and_div_to_ensemble:
-                        print(
-                            f"Adding model {len(ensemble_list) + 1}/{self.config.n_ensemble_models} with score = {score:.2f}, "
-                            f"accuracy = {accs[idx] / 100:.2f}, "
-                            f"distance = {dists[idx]:.2f}"
-                        )
-                        ensemble_list.append(self.config.selected_archs[idx])
-                        if len(ensemble_list) >= self.config.n_ensemble_models:
-                            break
-
-            tmp_archs = mutate_architectures(
-                ensemble_list,
-                n_mutations=4,
-                n_out_models=self.config.n_models_to_generate,
-            )
-            tmp_archs.extend(ensemble_list)
-
-        # shutil.rmtree(tmp_dir, ignore_errors=True)
-        self.config.selected_archs = ensemble_list
+        Args:
+            accuracy (torch.Tensor): Тензор с предсказанными точностями (в процентах, 0-100).
+            dist (torch.Tensor): Тензор с расстояниями.
+        
+        Returns:
+            torch.Tensor: Тензор с итоговыми оценками.
+        """
+        gamma = self.config.acc_distance_gamma
+        return (1 - gamma) * (accuracy / 100.0) + gamma * dist
+    
+    def _clear_all_buffers(self) -> None:
+        """Очищает все временные списки с моделями в `self`."""
+        # Буферы для пула кандидатов
+        self.potential_archs: List[Dict] = []
+        self.potential_embeddings: np.ndarray = np.array([])
+        self.potential_accuracies: np.ndarray = np.array([])
+        # Буферы для финального ансамбля
+        self.selected_archs: List[Dict] = []
 
     def paint_tsne(self, X, centroids, cluster_ids):
         # 2-step reduction: PCA -> 50d, then t-SNE -> 2d
@@ -476,26 +494,35 @@ class InferSurrogate:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Surrogate inference")
-    parser.add_argument("--hyperparameters_json", type=str, required=True)
+    parser = argparse.ArgumentParser(description="Surrogate-based Ensemble Selection")
+    parser.add_argument("--hyperparameters_json", type=str, required=True, 
+                        help="Path to the JSON file with configuration.")
     args = parser.parse_args()
 
-    params = json.loads(Path(args.hyperparameters_json).read_text())
-    # params.update({"device": "cuda" if torch.cuda.is_available() else "cpu"})
+    params = json.loads(Path(args.hyperparameters_json).read_text(encoding="utf-8"))
     config = TrainConfig(**params)
 
+
+    strategy = None
+    if getattr(config, 'greedy_choice_out_of_best', False):
+        strategy = 'greedy_forward'
+    elif getattr(config, 'random_choice_out_of_best', False):
+        strategy = 'random'
+    else:
+        strategy = 'cluster'
+    
+    print(f"Chosen selection strategy: '{strategy}'")
     inference = InferSurrogate(config)
+    
     inference.initialize_models()
 
-    if config.random_choice_out_of_best:
-        inference.architecture_search()
-        inference.random_choice_out_of_best()
-    elif config.greedy_choice_out_of_best:
-        inference.greedy_choice_out_of_best()
-    elif config.no_clusters_choice:
-        inference.architecture_search()
-        inference.select_models_only_score()
-    else:
-        inference.architecture_search()
-        inference.select_central_models_by_clusters()
+    try:
+        inference.run_selection(strategy=strategy) # <<-- Передаем сюда нашу переменную
+    except ValueError as e:
+        print(f"Error during selection: {e}")
+        exit(1)
+
     inference.save_models()
+
+    print("\nProcess finished successfully!")
+

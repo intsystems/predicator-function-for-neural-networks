@@ -442,36 +442,47 @@ class DiversityNESRunner:
             return max(indices)
     @staticmethod
     def train_single_model_process(architecture, model_id, gpu_id, config, dataset_key, num_classes):
-        # Устанавливаем видимые GPU
-        os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+        # Проверяем доступные GPU
+        visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+        if not visible_devices:
+            raise RuntimeError("CUDA_VISIBLE_DEVICES не установлен")
         
-        # Теперь CUDA доступна?
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        print(f"[Process {model_id}] Using device: {device}")
+        # Преобразуем в список доступных устройств
+        available_gpus = [int(d) for d in visible_devices.split(",") if d.strip().isdigit()]
+        
+        # Проверяем, что запрошенный GPU доступен
+        if gpu_id not in available_gpus:
+            raise ValueError(f"GPU {gpu_id} не доступен. Доступные GPU: {available_gpus}")
+        
+        # Получаем переназначенный индекс (после применения CUDA_VISIBLE_DEVICES)
+        cuda_index = available_gpus.index(gpu_id)
+        device = torch.device(f"cuda:{cuda_index}")
+        
+        print(f"[Process {model_id}] Using device: {device} (физический GPU {gpu_id})")
 
         # Создаём runner
         runner = DiversityNESRunner(config, DatasetsInfo.get(config.dataset_name.lower()))
         
-        # Получаем dataloaders — они будут на CPU
+        # Получаем dataloaders
         train_loader, valid_loader, test_loader = runner.get_data_loaders()
 
         # Обучаем модель
         model = runner.train_model(architecture, train_loader, valid_loader, model_id)
         
         if model is not None:
-            # Критически важно: убедиться, что модель на GPU
+            # Переносим модель на выбранное устройство
             model = model.to(device)
             
-            # Оценка — тоже на правильном устройстве
-        runner.evaluate_and_save_results(
-            model,
-            architecture,
-            valid_loader,
-            folder_name=config.output_path + "/trained_models_archs/",
-            model_id=model_id
-        )
+            # Оценка на том же устройстве
+            runner.evaluate_and_save_results(
+                model,
+                architecture,
+                valid_loader,
+                folder_name=config.output_path + "/trained_models_archs/",
+                model_id=model_id
+            )
         
-        print(f"[Process {model_id}] Done on GPU {gpu_id}")
+        print(f"[Process {model_id}] Обучение завершено на GPU {gpu_id} (cuda:{cuda_index})")
 
 
     def run(self):
