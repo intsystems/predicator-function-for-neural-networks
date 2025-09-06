@@ -449,50 +449,6 @@ class InferSurrogate:
         plt.savefig("logs/tsne.png")
         plt.close()
 
-    def save_models(self):
-        base_save_path = Path(self.config.best_models_save_path)
-        base_save_path.mkdir(parents=True, exist_ok=True)
-
-        # Найти следующий доступный индекс
-        existing_json_dirs = [
-            p for p in base_save_path.glob("models_json_*") if p.is_dir()
-        ]
-        indices = [
-            int(re.search(r"models_json_(\d+)", str(p)).group(1))
-            for p in existing_json_dirs
-            if re.search(r"models_json_(\d+)", str(p))
-        ]
-        next_index = max(indices, default=0) + 1
-
-        # Создание новых папок с новым индексом
-        models_json_dir = base_save_path / f"models_json_{next_index}"
-        models_pth_dir = base_save_path / f"models_pth_{next_index}"
-        models_json_dir.mkdir(parents=True, exist_ok=False)
-        models_pth_dir.mkdir(parents=True, exist_ok=False)
-
-        for i, arch in enumerate(self.config.selected_archs, 1):
-            if arch.get("id") is not None:
-                model_id = arch["id"]
-                file_path = models_json_dir / f"model_{model_id:d}.json"
-                file_path.write_text(json.dumps(arch, indent=4), encoding="utf-8")
-                print(f"Saved model {i} in {file_path}")
-
-                src = Path(
-                    re.sub(
-                        r"archs.*",
-                        f"pth/model_{model_id:d}.pth",
-                        str(self.config.prepared_dataset_path),
-                    )
-                )
-
-                dst = models_pth_dir / f"model_{model_id:d}.pth"
-                shutil.copy(src, dst)
-            else:
-                file_path = models_json_dir / f"model_{i:d}.json"
-                file_path.write_text(json.dumps(arch, indent=4), encoding="utf-8")
-                print(f"Saved model {i} in {file_path}")
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Surrogate-based Ensemble Selection")
     parser.add_argument("--hyperparameters_json", type=str, required=True, 

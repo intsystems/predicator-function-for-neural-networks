@@ -6,6 +6,7 @@ import argparse
 from pathlib import Path
 import random
 from typing import List, Tuple
+import time
 
 import numpy as np
 import torch
@@ -17,7 +18,10 @@ from nni.nas.evaluator.pytorch import DataLoader, Lightning, Trainer
 from nni.nas.space import model_context
 from tqdm import tqdm
 
-from multiprocessing import Process 
+import multiprocessing as mp
+import warnings
+
+warnings.filterwarnings("ignore")
 
 from utils_nni.DartsSpace import DARTS_with_CIFAR100 as DartsSpace
 from dependencies.darts_classification_module import DartsClassificationModule
@@ -48,7 +52,35 @@ def load_json_from_directory(directory_path: str) -> List[dict]:
                         print(f"Error decoding JSON from {file_path}: {e}")
     return json_data
 
-class DatasetsInfo:
+class Cutout(object):
+    def __init__(self, length):
+        self.length = length
+
+    def __call__(self, img):
+        if not isinstance(img, torch.Tensor):
+            raise TypeError(f"img should be Tensor. Got {type(img)}")
+            
+        device = img.device
+        c, h, w = img.size()
+        
+        mask = torch.ones((h, w), dtype=torch.float32, device=device)
+        
+        y = torch.randint(0, h, (1,), device=device).item()
+        x = torch.randint(0, w, (1,), device=device).item()
+        
+        y1 = max(0, y - self.length // 2)
+        y2 = min(h, y + self.length // 2)
+        x1 = max(0, x - self.length // 2)
+        x2 = min(w, x + self.length // 2)
+        
+        mask[y1:y2, x1:x2] = 0.
+        mask = mask.unsqueeze(0).expand_as(img)
+        
+        return img * mask
+
+
+
+class DatasetsInfo(object):
     DATASETS = {
         "cifar10": {
             "key": "cifar",
@@ -57,7 +89,18 @@ class DatasetsInfo:
             "mean": [0.4914, 0.4822, 0.4465],
             "std": [0.2470, 0.2435, 0.2616],
             "img_size": 32,
-            "transform": [],
+            "train_transform": transforms.Compose([
+                transforms.RandomCrop(32, padding=4),
+                transforms.RandomHorizontalFlip(),
+                transforms.AutoAugment(transforms.AutoAugmentPolicy.CIFAR10),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.4914, 0.4822, 0.4465], std=[0.2470, 0.2435, 0.2616]),
+                Cutout(16),
+            ]),
+            "test_transform": transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.4914, 0.4822, 0.4465], std=[0.2470, 0.2435, 0.2616]),
+            ]),
         },
         "cifar100": {
             "key": "cifar100",
@@ -66,7 +109,18 @@ class DatasetsInfo:
             "mean": [0.5071, 0.4867, 0.4408],
             "std": [0.2673, 0.2564, 0.2762],
             "img_size": 32,
-            "transform": [],
+            "train_transform": transforms.Compose([
+                transforms.RandomCrop(32, padding=4),
+                transforms.RandomHorizontalFlip(),
+                transforms.AutoAugment(transforms.AutoAugmentPolicy.CIFAR10),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.5071, 0.4867, 0.4408], std=[0.2673, 0.2564, 0.2762]),
+                Cutout(16),
+            ]),
+            "test_transform": transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.5071, 0.4867, 0.4408], std=[0.2673, 0.2564, 0.2762]),
+            ]),
         },
         "fashionmnist": {
             "key": "cifar",
@@ -75,19 +129,27 @@ class DatasetsInfo:
             "mean": [0.2860406],
             "std": [0.35302424],
             "img_size": 32,
-            "transform": [transforms.Resize(32)],
+            "train_transform": [transforms.Resize(32)],
+            "test_transform": [transforms.Resize(32)],
         },
     }
 
     @classmethod
-    def get(cls, name: str):
-        """Вернуть словарь с информацией о датасете по имени"""
-        return cls.DATASETS.get(name)
-
-    @classmethod
-    def available_datasets(cls):
-        """Вернуть список доступных датасетов"""
-        return list(cls.DATASETS.keys())
+    def get(cls, dataset_name: str):
+        """Возвращает конфигурацию датасета по его имени.
+        
+        Args:
+            dataset_name: Имя датасета (например, 'cifar10', 'cifar100', 'fashionmnist')
+            
+        Returns:
+            Словарь с конфигурацией датасета
+            
+        Raises:
+            ValueError: Если датасет с указанным именем не найден
+        """
+        if dataset_name not in cls.DATASETS:
+            raise ValueError(f"Unknown dataset: {dataset_name}. Available datasets: {list(cls.DATASETS.keys())}")
+        return cls.DATASETS[dataset_name]
 
 class DiversityNESRunner:
     def __init__(self, config: TrainConfig, info: DatasetsInfo):
@@ -99,7 +161,8 @@ class DiversityNESRunner:
         self.MEAN = info["mean"]
         self.STD = info["std"]
         self.img_size = info["img_size"]
-        self.base_transform = info["transform"]
+        self.train_transform = info["train_transform"]
+        self.test_transform = info["test_transform"]
 
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
@@ -115,23 +178,6 @@ class DiversityNESRunner:
         Create training and validation data loaders for the chosen dataset.
         """
         bs = batch_size if batch_size else self.config.batch_size_final
-        train_transform = transforms.Compose(
-            self.base_transform
-            + [
-                transforms.RandomHorizontalFlip(),
-                transforms.RandomCrop(32, padding=4),
-                transforms.ToTensor(),
-                transforms.Normalize(self.MEAN, self.STD),
-            ]
-        )
-        test_transform = transforms.Compose(
-            self.base_transform
-            + [
-                transforms.Grayscale(num_output_channels=3),
-                transforms.ToTensor(),
-                transforms.Normalize(self.MEAN, self.STD),
-            ]
-        )
 
         dataset_cls = self.dataset_cls
 
@@ -139,13 +185,13 @@ class DiversityNESRunner:
             root=self.config.final_dataset_path,
             train=True,
             download=True,
-            transform=train_transform,
+            transform=self.train_transform,
         )
         test_data = nni.trace(dataset_cls)(
             root=self.config.final_dataset_path,
             train=False,
             download=True,
-            transform=test_transform,
+            transform=self.test_transform,
         )
 
         num_samples = len(train_data)
@@ -164,7 +210,7 @@ class DiversityNESRunner:
             valid_loader = DataLoader(
                 valid_subset,
                 batch_size=bs,
-                num_workers=self.config.num_workers,
+                num_workers=0,
                 shuffle=False,
             )
 
@@ -172,14 +218,14 @@ class DiversityNESRunner:
         train_loader = DataLoader(
             train_subset,
             batch_size=bs,
-            num_workers=self.config.num_workers,
+            num_workers=0,
             shuffle=True,
         )
 
         test_loader = DataLoader(
             test_data,
             batch_size=bs,
-            num_workers=self.config.num_workers,
+            num_workers=0,
             shuffle=False,
         )
 
@@ -192,7 +238,9 @@ class DiversityNESRunner:
             if module.bias is not None:
                 torch.nn.init.zeros_(module.bias)
 
-    def train_model(self, architecture: dict, train_loader, valid_loader, model_id) -> torch.nn.Module:
+    def train_model(
+        self, architecture: dict, train_loader, valid_loader, model_id
+    ) -> torch.nn.Module:
         seed = self.config.seed + model_id
         random.seed(seed)
         np.random.seed(seed)
@@ -219,6 +267,7 @@ class DiversityNESRunner:
                     max_epochs=self.config.n_epochs_final,
                     num_classes=self.num_classes,
                     lr_final=self.config.lr_end_final,
+                    label_smoothing=0.15
                 ),
                 trainer=Trainer(
                     gradient_clip_val=5.0,
@@ -228,13 +277,14 @@ class DiversityNESRunner:
                     devices=1,
                     strategy="auto",
                     enable_progress_bar=True,
+                    precision="bf16-mixed",
+                    benchmark=True,
                 ),
                 train_dataloaders=train_loader,
                 val_dataloaders=valid_loader,
             )
             evaluator.fit(model)
 
-            # Убедимся, что модель на нужном устройстве
             model = model.to(self.device)
 
             # === Гарантированно создаём папку (на всякий случай) ===
@@ -250,11 +300,19 @@ class DiversityNESRunner:
         except Exception as e:
             print(f"Error training model {model_id}: {str(e)}")
             import traceback
+
             traceback.print_exc()
             return None
 
-
-    def evaluate_and_save_results(self, model, architecture, valid_loader, folder_name, mode="class", model_id=None):
+    def evaluate_and_save_results(
+        self,
+        model,
+        architecture,
+        valid_loader,
+        folder_name,
+        mode="class",
+        model_id=None,
+    ):
         device = next(model.parameters()).device
         model.eval()
 
@@ -292,7 +350,6 @@ class DiversityNESRunner:
             json.dump(result, f, indent=4)
 
         print(f"Results for model_{model_id} saved to {file_path}")
-        # Не меняем self.model_id — он не нужен
 
     def collect_ensemble_stats(self, test_loader):
         if not hasattr(self, "models") or not self.models:
@@ -419,7 +476,7 @@ class DiversityNESRunner:
 
         print(f"Results saved to {out_file}")
         return ensemble_acc, model_accs, ece
-    
+
     def get_latest_index_from_dir(self, base_path: Path = None) -> int:
         """
         Находит максимальный индекс среди директорий models_json_*
@@ -429,95 +486,231 @@ class DiversityNESRunner:
 
         candidates = [p for p in base_path.glob("models_json_*") if p.is_dir()]
         if not candidates:
-            raise FileNotFoundError(f"No models_json_* directories found in {base_path}")
+            raise FileNotFoundError(
+                f"No models_json_* directories found in {base_path}"
+            )
 
         indices = [
-            int(m.group(1)) for p in candidates
+            int(m.group(1))
+            for p in candidates
             if (m := re.search(r"models_json_(\d+)", str(p)))
         ]
 
         if not indices:
             raise ValueError("No valid indices found in models_json_* directories")
 
-            return max(indices)
+        return max(indices)
+
     @staticmethod
-    def train_single_model_process(architecture, model_id, gpu_id, config, dataset_key, num_classes):
-        # Проверяем доступные GPU
-        visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES", "")
-        if not visible_devices:
-            raise RuntimeError("CUDA_VISIBLE_DEVICES не установлен")
-        
-        # Преобразуем в список доступных устройств
-        available_gpus = [int(d) for d in visible_devices.split(",") if d.strip().isdigit()]
-        
-        # Проверяем, что запрошенный GPU доступен
-        if gpu_id not in available_gpus:
-            raise ValueError(f"GPU {gpu_id} не доступен. Доступные GPU: {available_gpus}")
-        
-        # Получаем переназначенный индекс (после применения CUDA_VISIBLE_DEVICES)
-        cuda_index = available_gpus.index(gpu_id)
-        device = torch.device(f"cuda:{cuda_index}")
-        
-        print(f"[Process {model_id}] Using device: {device} (физический GPU {gpu_id})")
+    def train_single_model_process(
+        architecture, model_id, physical_gpu_id, config, dataset_key, num_classes
+    ):
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(physical_gpu_id)
 
-        # Создаём runner
-        runner = DiversityNESRunner(config, DatasetsInfo.get(config.dataset_name.lower()))
-        
-        # Получаем dataloaders
-        train_loader, valid_loader, test_loader = runner.get_data_loaders()
+        try:
+            # === ОЧИСТКА ПАМЯТИ GPU ПЕРЕД НАЧАЛОМ ===
+            if torch.cuda.is_available():
+                torch.cuda.set_device(0)
+                torch.cuda.empty_cache()
+                torch.cuda.reset_peak_memory_stats(0)
+                torch.cuda.synchronize(0)
+            # ===============================
 
-        # Обучаем модель
-        model = runner.train_model(architecture, train_loader, valid_loader, model_id)
-        
-        if model is not None:
-            # Переносим модель на выбранное устройство
-            model = model.to(device)
-            
-            # Оценка на том же устройстве
-            runner.evaluate_and_save_results(
-                model,
-                architecture,
-                valid_loader,
-                folder_name=config.output_path + "/trained_models_archs/",
-                model_id=model_id
+            torch.set_float32_matmul_precision("high")
+            device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+            runner = DiversityNESRunner(
+                config, DatasetsInfo.get(config.dataset_name.lower())
             )
-        
-        print(f"[Process {model_id}] Обучение завершено на GPU {gpu_id} (cuda:{cuda_index})")
+            train_loader, valid_loader, test_loader = runner.get_data_loaders()
 
+            if valid_loader is None:
+                model = runner.train_model(
+                    architecture, train_loader, test_loader, model_id
+                )
+            else:
+                model = runner.train_model(
+                    architecture, train_loader, valid_loader, model_id
+                )
+
+            if model is not None:
+                model = model.to(device)
+
+            if valid_loader is None:
+                runner.evaluate_and_save_results(
+                    model,
+                    architecture,
+                    test_loader,
+                    folder_name=config.output_path + "/trained_models_archs/",
+                    model_id=model_id,
+                )
+            else:
+                runner.evaluate_and_save_results(
+                    model,
+                    architecture,
+                    valid_loader,
+                    folder_name=config.output_path + "/trained_models_archs/",
+                    model_id=model_id,
+                )
+
+        except Exception as e:
+            print(f"Error in process {model_id}: {e}")
+            raise
+
+        finally:
+            # === ФИНАЛЬНАЯ ОЧИСТКА ПАМЯТИ ===
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
     def run(self):
+        try:
+            mp.set_start_method("spawn", force=True)
+        except RuntimeError:
+            pass
+
         print("Loading architectures...")
         if self.config.evaluate_ensemble_flag:
             latest_index = self.get_latest_index_from_dir()
-            models_json_dir = Path(self.config.best_models_save_path) / f"models_json_{latest_index}"
+            models_json_dir = (
+                Path(self.config.best_models_save_path) / f"models_json_{latest_index}"
+            )
             arch_dicts = load_json_from_directory(models_json_dir)
         else:
             arch_dicts = generate_arch_dicts(self.config.n_models_to_evaluate)
 
         archs = [d["architecture"] for d in arch_dicts]
-        n_gpus = torch.cuda.device_count()
+        n_models = len(archs)
 
-        # === СОЗДАЁМ ВСЕ ПАПКИ ЗАРАНЕЕ ===
+        cuda_visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+        if cuda_visible_devices:
+            available_gpus = [int(x.strip()) for x in cuda_visible_devices.split(",")]
+        else:
+            available_gpus = list(range(torch.cuda.device_count()))
+
+        n_gpus = len(available_gpus)
+        print(f"Available physical GPUs: {available_gpus}")
+        print(f"Will train {n_models} models using up to {n_gpus} GPUs in parallel.")
+
+        # Создаём папки
         output_path = Path(self.config.output_path)
         (output_path / "trained_models_pth").mkdir(parents=True, exist_ok=True)
         (output_path / "trained_models_archs").mkdir(parents=True, exist_ok=True)
 
         print(f"Created output directories in {output_path}")
+        print("Starting training...")
 
+        # === ЗАПУСК С ОГРАНИЧЕНИЕМ: НЕ БОЛЕЕ n_gpus ПРОЦЕССОВ ОДНОВРЕМЕННО ===
         processes = []
+        active_processes = {}
+
         for idx, arch in enumerate(archs):
-            gpu_id = idx % n_gpus
-            p = Process(target=self.train_single_model_process, args=(
-                arch, idx, gpu_id, self.config, self.dataset_key, self.num_classes
-            ))
+            physical_gpu_id = available_gpus[idx % n_gpus]
+
+            # Ждём, пока освободится место
+            while len(processes) >= n_gpus:
+                # Проверяем, какие процессы завершились
+                for p_idx, p in list(active_processes.items()):
+                    if not p.is_alive():
+                        p.join()
+                        processes.remove(p)
+                        del active_processes[p_idx]
+                        break
+                time.sleep(0.5)  # Не нагружаем CPU
+
+            # Запускаем новый процесс
+            p = mp.get_context("spawn").Process(
+                target=self.train_single_model_process,
+                args=(
+                    arch,
+                    idx,
+                    physical_gpu_id,
+                    self.config,
+                    self.dataset_key,
+                    self.num_classes,
+                ),
+            )
             p.start()
             processes.append(p)
+            active_processes[idx] = p
 
+            print(f"Started process {idx} on GPU {physical_gpu_id}")
+
+        # Ждём завершения оставшихся
         for p in processes:
             p.join()
 
-        print("All models trained!")
+        print("All models trained! Logs saved in 'logs/' directory.")
 
+        if self.config.evaluate_ensemble_flag:
+            self.fill_models_list()
+            _, _, test_loader = runner.get_data_loaders()
+            root_dir = Path(self.config.best_models_save_path)
+            last_index = self.get_latest_index_from_dir(root_dir)
+            print(f"\nEvaluating ensemble at index {last_index}...")
+            stats = self.collect_ensemble_stats(test_loader)
+            self.finalize_ensemble_evaluation(stats, f"ensemble_results_{last_index}")
+
+        print(
+            f"\nAll pretrained models from index {last_index} evaluated successfully!"
+        )
+
+    def fill_models_list(self):
+        archs_path = Path(self.config.output_path) / "trained_models_archs"
+        pth_path = Path(self.config.output_path) / "trained_models_pth"
+
+        if not archs_path.exists():
+            raise FileNotFoundError(f"Directory not found: {archs_path}")
+        if not pth_path.exists():
+            raise FileNotFoundError(f"Directory not found: {pth_path}")
+
+        self.models = []
+        device = self.device
+
+        json_files = sorted(archs_path.glob("model_*.json"))
+        if not json_files:
+            print("No .json files found in trained_models_archs/")
+            return
+
+        print(f"Found {len(json_files)} models to load. Loading...")
+
+        for json_file in json_files:
+            try:
+                m = re.search(r"model_(\d+)\.json", json_file.name)
+                if not m:
+                    print(f"Skipping invalid filename: {json_file.name}")
+                    continue
+                model_id = int(m.group(1))
+
+                with open(json_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                arch = data["architecture"]
+
+                with model_context(arch):
+                    model = DartsSpace(
+                        width=self.config.width,
+                        num_cells=self.config.num_cells,
+                        dataset=self.dataset_key,
+                    )
+
+                pth_file = pth_path / f"model_{model_id}.pth"
+                if not pth_file.exists():
+                    print(f"Weights not found for model_{model_id} at {pth_file}")
+                    continue
+
+                state_dict = torch.load(pth_file, map_location="cpu", weights_only=True)
+                model.load_state_dict(state_dict)
+                model = model.to(device)
+                self.models.append(model)
+
+                print(f"✅ Model {model_id} loaded and added to self.models")
+
+            except Exception as e:
+                print(f"❌ Failed to load model from {json_file}: {e}")
+                import traceback
+
+                traceback.print_exc()
+
+        print(f"Successfully loaded {len(self.models)} models into self.models.")
 
     def run_all_pretrained(self):
         """
@@ -566,7 +759,9 @@ class DiversityNESRunner:
         _, valid_loader, test_loader = self.get_data_loaders()
 
         print(f"Loading and evaluating {len(arch_dicts)} pretrained models...")
-        for idx, arch_entry in enumerate(tqdm(arch_dicts, desc=f"Evaluating models in index {index}")):
+        for idx, arch_entry in enumerate(
+            tqdm(arch_dicts, desc=f"Evaluating models in index {index}")
+        ):
             arch = arch_entry["architecture"]
             model_id = arch_entry.get("id")
             self.model_id = model_id
@@ -586,7 +781,9 @@ class DiversityNESRunner:
             model_path = pth_dir / f"model_{model_id}.pth"
             if not model_path.exists():
                 raise FileNotFoundError(f"Model weights not found at {model_path}")
-            model.load_state_dict(torch.load(model_path, map_location=self.device, weights_only=True))
+            model.load_state_dict(
+                torch.load(model_path, map_location=self.device, weights_only=True)
+            )
             self.models.append(model)
 
             if not self.config.evaluate_ensemble_flag:
@@ -595,7 +792,7 @@ class DiversityNESRunner:
                     arch,
                     valid_loader,
                     self.config.output_path + f"/trained_models_archs_{index}/",
-                    mode="class"
+                    mode="class",
                 )
 
         if self.config.evaluate_ensemble_flag:
@@ -619,7 +816,7 @@ if __name__ == "__main__":
     # Load hyperparameters from JSON and set device automatically
     params = json.loads(Path(args.hyperparameters_json).read_text())
     params.update({"device": "cuda:0" if torch.cuda.is_available() else "cpu"})
-    
+
     config = TrainConfig(**params)
     info = DatasetsInfo.get(config.dataset_name.lower())
     runner = DiversityNESRunner(config, info)

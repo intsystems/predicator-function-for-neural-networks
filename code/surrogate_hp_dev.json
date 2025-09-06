@@ -47,16 +47,16 @@
 
 
     "n_epochs_final": 600,
-    "lr_start_final": 1e-1,
-    "lr_end_final": 0,
-    "batch_size_final": 2048,
+    "lr_start_final": 0.2,
+    "lr_end_final": 1e-5,
+    "batch_size_final": 512,
     "dataset_name": "CIFAR100",
 
     "final_dataset_path": "datasets/final_dataset/",
-    "evaluate_ensemble_flag": false,
+    "evaluate_ensemble_flag": true,
     "n_models_to_evaluate":10,
     "output_path": "output/",
     "width": 16,
-    "num_cells": 10,
-    "n_ece_bins": 15
+    "num_cells": 20,
+    "n_ece_bins": 36
 }

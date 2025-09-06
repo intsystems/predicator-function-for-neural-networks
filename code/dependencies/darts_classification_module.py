@@ -1,7 +1,7 @@
 import torch
+import torch.nn as nn
+from torch.optim.lr_scheduler import LinearLR, CosineAnnealingLR, SequentialLR
 from nni.nas.evaluator.pytorch import ClassificationModule
-from torch.nn import DataParallel
-
 
 class DartsClassificationModule(ClassificationModule):
     def __init__(
@@ -11,26 +11,43 @@ class DartsClassificationModule(ClassificationModule):
         auxiliary_loss_weight: float = 0.4,
         max_epochs: int = 600,
         num_classes: int = 10,
-        lr_final: float = 1e-3
+        lr_final: float = 1e-5,
+        warmup_epochs: int = 10,
+        label_smoothing: float = 0.0,
     ):
         self.auxiliary_loss_weight = auxiliary_loss_weight
-        # Training length will be used in LR scheduler
         self.max_epochs = max_epochs
         self.lr_final = lr_final
-        super().__init__(learning_rate=learning_rate, weight_decay=weight_decay, export_onnx=False, num_classes=num_classes)
-        
+        self.warmup_epochs = max(0, int(warmup_epochs))
+        self._drop_path_max = None
+
+        super().__init__(
+            learning_rate=learning_rate,
+            weight_decay=weight_decay,
+            export_onnx=False,
+            num_classes=num_classes
+        )
+
+        if label_smoothing and label_smoothing > 0.0:
+            self.criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
+
     def configure_optimizers(self):
-        """Customized optimizer with momentum, as well as a scheduler."""
         optimizer = torch.optim.SGD(
             self.parameters(),
             momentum=0.9,
             lr=self.hparams.learning_rate,
             weight_decay=self.hparams.weight_decay
         )
-        # Cosine annealing scheduler with T_max equal to total epochs
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=self.max_epochs, eta_min=self.lr_final
-        )
+
+        t_max = max(1, self.max_epochs - self.warmup_epochs)
+        cosine = CosineAnnealingLR(optimizer, T_max=t_max, eta_min=self.lr_final)
+
+        if self.warmup_epochs > 0:
+            warmup = LinearLR(optimizer, start_factor=1e-3, end_factor=1.0, total_iters=self.warmup_epochs)
+            scheduler = SequentialLR(optimizer, schedulers=[warmup, cosine], milestones=[self.warmup_epochs])
+        else:
+            scheduler = cosine
+
         return {
             'optimizer': optimizer,
             'lr_scheduler': {
@@ -41,39 +58,47 @@ class DartsClassificationModule(ClassificationModule):
         }
 
     def training_step(self, batch, batch_idx):
-        """Training step, customized with auxiliary loss and flexible unpacking."""
         x, y = batch
         out = self(x)
-        # Handle auxiliary output if present
+
         if self.auxiliary_loss_weight and isinstance(out, (tuple, list)) and len(out) == 2:
             y_hat, y_aux = out
             loss_main = self.criterion(y_hat, y)
             loss_aux = self.criterion(y_aux, y)
-            self.log('train_loss_main', loss_main)
-            self.log('train_loss_aux', loss_aux)
             loss = loss_main + self.auxiliary_loss_weight * loss_aux
+            self.log('train_loss_main', loss_main, prog_bar=False, on_epoch=True, on_step=False)
+            self.log('train_loss_aux', loss_aux, prog_bar=False, on_epoch=True, on_step=False)
         else:
-            # single output or no auxiliary
             y_hat = out[0] if isinstance(out, (tuple, list)) else out
             loss = self.criterion(y_hat, y)
-        self.log('train_loss', loss, prog_bar=True)
+
+        self.log('train_loss', loss, prog_bar=True, on_epoch=True, on_step=False)
+
         for name, metric in self.metrics.items():
-            self.log('train_' + name, metric(y_hat, y), prog_bar=True)
+            self.log('train_' + name, metric(y_hat, y), prog_bar=True, on_epoch=True, on_step=False)
+
         return loss
 
     def on_train_epoch_start(self):
-        # Handle DataParallel wrapper when adjusting drop path
-        model = self.trainer.model
-        if isinstance(model, DataParallel):
-            target_model = model.module
-        else:
-            target_model = model
+        try:
+            lr = self.trainer.optimizers[0].param_groups[0]['lr']
+            self.log('lr', lr, prog_bar=True, on_epoch=True, on_step=False)
+        except Exception:
+            pass
 
-        # Set drop path probability before every epoch, scaled by epoch ratio
-        if hasattr(target_model, 'set_drop_path_prob') and hasattr(target_model, 'drop_path_prob'):
-            drop_prob = target_model.drop_path_prob * self.current_epoch / self.max_epochs
-            target_model.set_drop_path_prob(drop_prob)
+        model = getattr(self, 'model', None)
 
-        # Logging learning rate at the beginning of every epoch
-        lr = self.trainer.optimizers[0].param_groups[0]['lr']
-        self.log('lr', lr)
+        if model is not None:
+            if self._drop_path_max is None:
+                if hasattr(model, 'drop_path_prob'):
+                    self._drop_path_max = float(getattr(model, 'drop_path_prob'))
+                else:
+                    self._drop_path_max = 0.0
+
+            ratio = min(1.0, float(self.current_epoch + 1) / float(max(1, self.max_epochs)))
+            drop_prob = self._drop_path_max * ratio
+
+            if hasattr(model, 'set_drop_path_prob') and callable(getattr(model, 'set_drop_path_prob')):
+                model.set_drop_path_prob(drop_prob)
+            elif hasattr(model, 'drop_path_prob'):
+                setattr(model, 'drop_path_prob', drop_prob)
