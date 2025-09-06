@@ -289,7 +289,7 @@ class DiversityNESRunner:
 
             # === Гарантированно создаём папку (на всякий случай) ===
             save_path = Path(self.config.output_path) / "trained_models_pth"
-            save_path.mkdir(parents=True, exist_ok=True)  # теперь безопасно
+            save_path.mkdir(parents=True, exist_ok=True)
 
             model_path = save_path / f"model_{model_id}.pth"
             torch.save(model.state_dict(), model_path)
@@ -341,7 +341,6 @@ class DiversityNESRunner:
             "valid_accuracy": valid_accuracy,
         }
 
-        # Используем переданный model_id, а не self.model_id
         file_name = f"model_{model_id}.json"
         file_path = os.path.join(folder_name, file_name)
 
@@ -591,7 +590,6 @@ class DiversityNESRunner:
         print(f"Available physical GPUs: {available_gpus}")
         print(f"Will train {n_models} models using up to {n_gpus} GPUs in parallel.")
 
-        # Создаём папки
         output_path = Path(self.config.output_path)
         (output_path / "trained_models_pth").mkdir(parents=True, exist_ok=True)
         (output_path / "trained_models_archs").mkdir(parents=True, exist_ok=True)
@@ -606,18 +604,15 @@ class DiversityNESRunner:
         for idx, arch in enumerate(archs):
             physical_gpu_id = available_gpus[idx % n_gpus]
 
-            # Ждём, пока освободится место
             while len(processes) >= n_gpus:
-                # Проверяем, какие процессы завершились
                 for p_idx, p in list(active_processes.items()):
                     if not p.is_alive():
                         p.join()
                         processes.remove(p)
                         del active_processes[p_idx]
                         break
-                time.sleep(0.5)  # Не нагружаем CPU
+                time.sleep(0.5)
 
-            # Запускаем новый процесс
             p = mp.get_context("spawn").Process(
                 target=self.train_single_model_process,
                 args=(
@@ -635,7 +630,6 @@ class DiversityNESRunner:
 
             print(f"Started process {idx} on GPU {physical_gpu_id}")
 
-        # Ждём завершения оставшихся
         for p in processes:
             p.join()
 
