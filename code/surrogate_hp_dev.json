@@ -2,8 +2,8 @@
     "seed":42,
     "num_workers": 16,
     "dataset_path": "datasets/cifar100_archs",
-    "device": "cpu",
-    "developer_mode": true,
+    "device": "cuda:1",
+    "developer_mode": false,
 
     "n_models": 1086,
 
@@ -34,10 +34,10 @@
     "use_pretrained_models_for_ensemble": false,
     "n_ensemble_models": 5,
     "n_models_in_pool": 4096,
-    "n_models_to_generate": 1024000,
+    "n_models_to_generate": 4096000,
     "batch_size_inference": 4096,
     "min_accuracy_for_pool": 0.4895,
-    "acc_distance_gamma":0.07,
+    "acc_distance_gamma":0.1,
     "min_acc_and_div_to_ensemble": 0.1,
     "best_models_save_path": "best_models/",
     "tmp_archs_path": "datasets/tmp_archs/",
@@ -46,17 +46,17 @@
     "greedy_choice_out_of_best" : true,
 
 
-    "n_epochs_final": 2,
-    "lr_start_final": 0.2,
-    "lr_end_final": 1e-5,
-    "batch_size_final": 512,
+    "n_epochs_final": 600,
+    "lr_start_final": 0.025,
+    "lr_end_final": 1e-3,
+    "batch_size_final": 96,
     "dataset_name": "CIFAR100",
 
     "final_dataset_path": "datasets/final_dataset/",
     "evaluate_ensemble_flag": true,
     "n_models_to_evaluate":10,
     "output_path": "output/",
-    "width": 16,
+    "width": 36,
     "num_cells": 20,
-    "n_ece_bins": 36
+    "n_ece_bins": 16
 }

@@ -4,6 +4,8 @@ import copy
 from tqdm import tqdm
 from joblib import Parallel, delayed
 from pathlib import Path
+import numpy as np
+import multiprocessing as mp
 
 DARTS_OPS = [
     # 'none',
@@ -17,13 +19,29 @@ DARTS_OPS = [
 ]
 
 
-def generate_cells(num_nodes, name="normal", operations=DARTS_OPS):
+def generate_cells(num_nodes, name="normal", operations=DARTS_OPS, rng=None):
     cells = dict()
+    
     for i in range(num_nodes - 1):
         cur_indexes = list(range(0, i + 2))
-        random_op_0, random_op_1 = random.choices(operations, k=2)
 
-        random_index_0, random_index_1 = random.sample(cur_indexes, k=2)
+        if rng is None:
+            random_op_0, random_op_1 = random.choices(operations, k=2)
+        elif hasattr(rng, 'choices'):
+            random_op_0, random_op_1 = rng.choices(operations, k=2)
+        else:
+            random_op_0 = operations[int(rng.integers(0, len(operations)))]
+            random_op_1 = operations[int(rng.integers(0, len(operations)))]
+
+        if rng is None:
+            random_index_0, random_index_1 = random.sample(cur_indexes, k=2)
+        elif hasattr(rng, 'sample'):
+            random_index_0, random_index_1 = rng.sample(cur_indexes, k=2)
+        elif hasattr(rng, 'choice'):
+            indices = rng.choice(cur_indexes, size=2, replace=False, shuffle=True)
+            random_index_0, random_index_1 = int(indices[0]), int(indices[1])
+        else:
+            raise ValueError(f"Unsupported rng type: {type(rng)}")
 
         op_str_0 = f"{name}/op_{i + 2}_0"
         op_str_1 = f"{name}/op_{i + 2}_1"
@@ -31,29 +49,55 @@ def generate_cells(num_nodes, name="normal", operations=DARTS_OPS):
         input_str_1 = f"{name}/input_{i + 2}_1"
 
         cells[op_str_0] = random_op_0
-        cells[input_str_0] = [random_index_0]
+        cells[input_str_0] = [int(random_index_0)]
         cells[op_str_1] = random_op_1
-        cells[input_str_1] = [random_index_1]
+        cells[input_str_1] = [int(random_index_1)]
 
     return cells
 
 
-def generate_single_architecture():
-    normal_cell = generate_cells(5, name="normal")
-    reduction_cell = generate_cells(5, name="reduce")
+def generate_single_architecture(seed=None):
+    if seed is None:
+        seed = np.random.SeedSequence().generate_state(1)[0]
+    
+    rng = np.random.Generator(np.random.PCG64(seed))
+    
+    normal_cell = generate_cells(5, name="normal", rng=rng)
+    reduction_cell = generate_cells(5, name="reduce", rng=rng)
+    
     tmp_dict = {**normal_cell, **reduction_cell}
-    return {"architecture": tmp_dict}
+    return {"architecture": tmp_dict, "seed": int(seed)}
 
+def generate_unique_seeds(N_MODELS, low=1, high=int(1e9)):
+    seeds = set()
+    rng = np.random.default_rng()
+    while len(seeds) < N_MODELS:
+        print(f"preparing random seeds, progress:{len(seeds)}/{N_MODELS}", end='\r')
+        seeds.add(int(rng.integers(low, high)))
+    return list(seeds)
 
-def generate_arch_dicts(N_MODELS, use_tqdm=False):
-    iterable = range(N_MODELS)
-    if use_tqdm:
-        iterable = tqdm(iterable)
+def generate_arch_dicts(N_MODELS, use_tqdm=False, n_jobs=None, batch_size=100):
+    if n_jobs is None:
+        n_jobs = min(8, mp.cpu_count())
 
-    arch_dicts = Parallel(n_jobs=-1)(
-        delayed(generate_single_architecture)() for _ in iterable
+    seeds = generate_unique_seeds(N_MODELS)
+
+    def chunks(lst, n):
+        for i in range(0, len(lst), n):
+            yield lst[i:i+n]
+
+    def safe_generate_batch(seed_batch):
+        return [generate_single_architecture(seed=s) for s in seed_batch]
+
+    batches = list(chunks(seeds, batch_size))
+    iterable = tqdm(batches, desc="Generating batches", total=len(batches)) if use_tqdm else batches
+
+    results = Parallel(n_jobs=n_jobs, backend="loky")(
+        delayed(safe_generate_batch)(batch) for batch in iterable
     )
-    return arch_dicts
+
+    return [arch for batch in results for arch in batch]
+
 
 
 def mutate_architectures(
