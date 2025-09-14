@@ -1,6 +1,7 @@
 import sys
 import os
 import json
+import shutil
 
 import torch
 import torch.nn as nn
@@ -401,91 +402,124 @@ def train_model_diversity(
     developer_mode=False,
     final_lr=0.001,
     draw_figure=False,
+    save_path="checkpoints/best_diversity_model.pth",  # путь к чекпоинту
 ):
     model.to(device)
     train_losses, valid_losses = [], []
-    scheduler = CosineAnnealingLR(optimizer, num_epochs, eta_min=final_lr)
+    scheduler = CosineAnnealingLR(optimizer, T_max=num_epochs, eta_min=final_lr)
 
-    for epoch in tqdm(range(num_epochs), desc="Training Progress"):
-        # --------------------
-        # 1) Training pass
-        # --------------------
-        model.train()
-        running_loss = 0.0
-        n_batches = 0
+    # --- Создаём временную папку ---
+    checkpoint_dir = os.path.dirname(save_path)
+    if checkpoint_dir and not os.path.exists(checkpoint_dir):
+        os.makedirs(checkpoint_dir, exist_ok=True)
+        temp_dir_created = True
+    else:
+        temp_dir_created = False
 
-        for i, (anchor_batch, pos_batch, neg_batch, idx_triplet) in enumerate(
-            train_loader
-        ):
-            if developer_mode and i > 0:
-                break
+    best_valid_loss = float('inf')
 
-            optimizer.zero_grad()
-            # Move the entire batch to device
-            anchor_batch = anchor_batch.to(device)
-            pos_batch = pos_batch.to(device)
-            neg_batch = neg_batch.to(device)
+    try:
+        for epoch in tqdm(range(num_epochs), desc="Training Progress"):
+            # --------------------
+            # 1) Training pass
+            # --------------------
+            model.train()
+            running_loss = 0.0
+            n_batches = 0
 
-            # Feed through the model
-            emb_anchor = model(
-                anchor_batch.x, anchor_batch.edge_index, anchor_batch.batch
-            )
-            emb_pos = model(pos_batch.x, pos_batch.edge_index, pos_batch.batch)
-            emb_neg = model(neg_batch.x, neg_batch.edge_index, neg_batch.batch)
-
-            # Calculate loss, backward, step
-            loss = criterion(emb_anchor, emb_pos, emb_neg)
-            loss.backward()
-            optimizer.step()
-
-            running_loss += loss.item()
-            n_batches += 1
-
-        scheduler.step()
-        avg_train_loss = running_loss / max(1, n_batches)
-        train_losses.append(avg_train_loss)
-
-        # --------------------
-        # 2) Validation
-        # --------------------
-        model.eval()
-        val_loss = 0.0
-        n_val_batches = 0
-
-        with torch.no_grad():
-            for i, (anchor_batch, pos_batch, neg_batch, idx_triplet) in enumerate(
-                valid_loader
-            ):
+            for i, (anchor_batch, pos_batch, neg_batch, idx_triplet) in enumerate(train_loader):
                 if developer_mode and i > 0:
                     break
 
-                # Move the entire batch to device
+                optimizer.zero_grad()
+
+                # Move to device
                 anchor_batch = anchor_batch.to(device)
                 pos_batch = pos_batch.to(device)
                 neg_batch = neg_batch.to(device)
 
-                emb_anchor = model(
-                    anchor_batch.x, anchor_batch.edge_index, anchor_batch.batch
-                )
+                # Forward pass
+                emb_anchor = model(anchor_batch.x, anchor_batch.edge_index, anchor_batch.batch)
                 emb_pos = model(pos_batch.x, pos_batch.edge_index, pos_batch.batch)
                 emb_neg = model(neg_batch.x, neg_batch.edge_index, neg_batch.batch)
 
+                # Loss & step
                 loss = criterion(emb_anchor, emb_pos, emb_neg)
-                val_loss += loss.item()
-                n_val_batches += 1
+                loss.backward()
+                optimizer.step()
 
-        avg_valid_loss = val_loss / max(1, n_val_batches)
-        valid_losses.append(avg_valid_loss)
+                running_loss += loss.item()
+                n_batches += 1
 
-        lr = scheduler.get_last_lr()[0]
-        print(
-            f"Epoch {epoch+1}/{num_epochs} — "
-            f"Train Loss: {avg_train_loss:.4f}, Valid Loss: {avg_valid_loss:.4f}, LR: {lr:.6f}"
-        )
+            scheduler.step()
+            avg_train_loss = running_loss / max(1, n_batches)
+            train_losses.append(avg_train_loss)
 
-    plot_train_valid_losses(train_losses, valid_losses, file_name="diversity_model.png")
+            # --------------------
+            # 2) Validation
+            # --------------------
+            model.eval()
+            val_loss = 0.0
+            n_val_batches = 0
+
+            with torch.no_grad():
+                for i, (anchor_batch, pos_batch, neg_batch, idx_triplet) in enumerate(valid_loader):
+                    if developer_mode and i > 0:
+                        break
+
+                    anchor_batch = anchor_batch.to(device)
+                    pos_batch = pos_batch.to(device)
+                    neg_batch = neg_batch.to(device)
+
+                    emb_anchor = model(anchor_batch.x, anchor_batch.edge_index, anchor_batch.batch)
+                    emb_pos = model(pos_batch.x, pos_batch.edge_index, pos_batch.batch)
+                    emb_neg = model(neg_batch.x, neg_batch.edge_index, neg_batch.batch)
+
+                    loss = criterion(emb_anchor, emb_pos, emb_neg)
+                    val_loss += loss.item()
+                    n_val_batches += 1
+
+            avg_valid_loss = val_loss / max(1, n_val_batches)
+            valid_losses.append(avg_valid_loss)
+
+            # === Сохранение лучшей модели ===
+            if avg_valid_loss < best_valid_loss:
+                best_valid_loss = avg_valid_loss
+                torch.save(model.state_dict(), save_path)
+                print(f"✅ Best diversity model saved to {save_path} (Valid Loss: {avg_valid_loss:.4f})")
+
+            # === Логирование ===
+            lr = scheduler.get_last_lr()[0]
+            print(
+                f"Epoch {epoch+1}/{num_epochs} — "
+                f"Train Loss: {avg_train_loss:.4f}, Valid Loss: {avg_valid_loss:.4f}, LR: {lr:.6f}"
+            )
+
+        # === Загружаем лучшую модель в память ===
+        model.load_state_dict(torch.load(save_path, map_location=device))
+        print(f"✅ Loaded best diversity model from {save_path}")
+
+    except Exception as e:
+        # Удаляем папку при ошибке
+        if temp_dir_created and checkpoint_dir and os.path.exists(checkpoint_dir):
+            shutil.rmtree(checkpoint_dir, ignore_errors=True)
+            print(f"🧹 Temporary directory '{checkpoint_dir}' removed after error.")
+        raise
+
+    finally:
+        # === Удаляем временную папку в любом случае ===
+        if temp_dir_created and checkpoint_dir and os.path.exists(checkpoint_dir):
+            shutil.rmtree(checkpoint_dir, ignore_errors=True)
+            print(f"🧹 Temporary directory '{checkpoint_dir}' removed.")
+
+    # === Построение графика ===
+    if draw_figure:
+        tmp_train_losses = np.array(train_losses)
+        tmp_valid_losses = np.array(valid_losses)
+        plot_train_valid_losses(tmp_train_losses, tmp_valid_losses, file_name="diversity_model.png")
 
     return train_losses, valid_losses
+
 
 
 def train_model_accuracy(
@@ -498,66 +532,97 @@ def train_model_accuracy(
     device="cpu",
     developer_mode=False,
     final_lr=0.001,
+    save_path="checkpoints/best_accuracy_model.pth",  # можно передать другой путь
 ):
     model.to(device)
     train_losses = []
     valid_losses = []
 
-    scheduler = CosineAnnealingLR(optimizer, num_epochs, eta_min=final_lr)
+    scheduler = CosineAnnealingLR(optimizer, T_max=num_epochs, eta_min=final_lr)
 
-    for epoch in tqdm(range(num_epochs), desc="Training Progress"):
-        model.train()
-        train_loss = 0
-        n_train_samples = 0
+    # --- Создаём временную папку ---
+    checkpoint_dir = os.path.dirname(save_path)
+    if checkpoint_dir and not os.path.exists(checkpoint_dir):
+        os.makedirs(checkpoint_dir, exist_ok=True)
+        temp_dir_created = True
+    else:
+        temp_dir_created = False
 
-        for i, data in enumerate(train_loader):
-            if developer_mode and i > 0:
-                break
+    best_valid_loss = float('inf')
 
-            data = data.to(device)
-            optimizer.zero_grad()
+    try:
+        for epoch in tqdm(range(num_epochs), desc="Training Progress"):
+            # === Training ===
+            model.train()
+            train_loss = 0
+            n_train_samples = 0
 
-            prediction = model(data.x, data.edge_index, data.batch).squeeze()
-            target = data.y.float()
-
-            loss = criterion(prediction, target)
-            loss.backward()
-            optimizer.step()
-
-            train_loss += loss.item() * data.num_graphs  # весим loss по числу графов
-            n_train_samples += data.num_graphs
-
-        scheduler.step()
-        avg_train_loss = train_loss / max(1, n_train_samples)
-        train_losses.append(avg_train_loss)
-
-        # Validation
-        model.eval()
-        valid_loss = 0
-        n_val_samples = 0
-
-        with torch.no_grad():
-            for i, data in enumerate(valid_loader):
+            for i, data in enumerate(train_loader):
                 if developer_mode and i > 0:
                     break
 
                 data = data.to(device)
+                optimizer.zero_grad()
 
                 prediction = model(data.x, data.edge_index, data.batch).squeeze()
                 target = data.y.float()
 
                 loss = criterion(prediction, target)
-                valid_loss += loss.item() * data.num_graphs
-                n_val_samples += data.num_graphs
+                loss.backward()
+                optimizer.step()
 
-        avg_valid_loss = valid_loss / max(1, n_val_samples)
-        valid_losses.append(avg_valid_loss)
+                train_loss += loss.item() * data.num_graphs
+                n_train_samples += data.num_graphs
 
-        lr = scheduler.get_last_lr()[0]
-        print(
-            f"Epoch {epoch+1}, Train Loss: {avg_train_loss * 1e4:.4f}, "
-            f"Valid Loss: {avg_valid_loss * 1e4:.4f}, LR: {lr:.6f}"
-        )
+            scheduler.step()
+            avg_train_loss = train_loss / max(1, n_train_samples)
+            train_losses.append(avg_train_loss)
+
+            # === Validation ===
+            model.eval()
+            valid_loss = 0
+            n_val_samples = 0
+
+            with torch.no_grad():
+                for i, data in enumerate(valid_loader):
+                    if developer_mode and i > 0:
+                        break
+
+                    data = data.to(device)
+                    prediction = model(data.x, data.edge_index, data.batch).squeeze()
+                    target = data.y.float()
+
+                    loss = criterion(prediction, target)
+                    valid_loss += loss.item() * data.num_graphs
+                    n_val_samples += data.num_graphs
+
+            avg_valid_loss = valid_loss / max(1, n_val_samples)
+            valid_losses.append(avg_valid_loss)
+
+            if avg_valid_loss < best_valid_loss:
+                best_valid_loss = avg_valid_loss
+                torch.save(model.state_dict(), save_path)
+                print(f"✅ Best model saved to {save_path} (Valid Loss: {avg_valid_loss * 1e4:.4f})")
+
+            lr = scheduler.get_last_lr()[0]
+            print(
+                f"Epoch {epoch+1}, Train Loss: {avg_train_loss * 1e4:.4f}, "
+                f"Valid Loss: {avg_valid_loss * 1e4:.4f}, LR: {lr:.6f}"
+            )
+
+        model.load_state_dict(torch.load(save_path, map_location=device))
+        print(f"✅ Loaded best model from {save_path}")
+
+    except Exception as e:
+        if temp_dir_created and checkpoint_dir and os.path.exists(checkpoint_dir):
+            shutil.rmtree(checkpoint_dir, ignore_errors=True)
+            print(f"🧹 Temporary directory '{checkpoint_dir}' removed after error.")
+        raise
+
+    finally:
+        if temp_dir_created and checkpoint_dir and os.path.exists(checkpoint_dir):
+            shutil.rmtree(checkpoint_dir, ignore_errors=True)
+            print(f"🧹 Temporary directory '{checkpoint_dir}' removed.")
 
     tmp_train_losses = np.sqrt(np.array(train_losses))
     tmp_valid_losses = np.sqrt(np.array(valid_losses))
@@ -565,7 +630,59 @@ def train_model_accuracy(
         tmp_train_losses, tmp_valid_losses, file_name="accuracy_model.png"
     )
 
+    save_accuracy_predictions(
+        model=model,
+        data_loader=valid_loader,
+        device=device,
+        file_path="logs/accuracy_predictions.txt",
+        developer_mode=developer_mode,
+    )
+
     return train_losses, valid_losses
+
+
+
+def save_accuracy_predictions(
+    model,
+    data_loader,
+    device="cpu",
+    file_path="logs/accuracy_predictions.txt",
+    developer_mode=False,
+):
+    model.eval()
+    true_accs = []
+    pred_accs = []
+
+    with torch.no_grad():
+        for i, data in enumerate(data_loader):
+            if developer_mode and i > 0:
+                break
+
+            data = data.to(device)
+            prediction = (
+                model(data.x, data.edge_index, data.batch).squeeze().cpu().numpy()
+            )
+            target = data.y.cpu().numpy()
+
+            # Переводим в проценты, если нужно
+            if target.max() <= 1.0:
+                target = target * 100  # [0, 1] → [0, 100]
+            if prediction.max() <= 1.0:
+                prediction = prediction * 100
+
+            true_accs.extend(target)
+            pred_accs.extend(prediction)
+
+    # Создаём папку
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+    # Сохраняем
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write("true_acc pred_acc\n")
+        for true, pred in zip(true_accs, pred_accs):
+            f.write(f"{true:.4f} {pred:.4f}\n")
+
+    print(f"✅ Saved {len(true_accs)} true/pred pairs to {file_path}")
 
 
 def plot_train_valid_losses(

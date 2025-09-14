@@ -523,14 +523,9 @@ class DiversityNESRunner:
             )
             train_loader, valid_loader, test_loader = runner.get_data_loaders()
 
-            if valid_loader is None:
-                model = runner.train_model(
-                    architecture, train_loader, test_loader, model_id
-                )
-            else:
-                model = runner.train_model(
-                    architecture, train_loader, valid_loader, model_id
-                )
+            model = runner.train_model(
+                architecture, train_loader, valid_loader, model_id
+            )
 
             if model is not None:
                 model = model.to(device)

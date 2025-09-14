@@ -12,7 +12,7 @@ class DartsClassificationModule(ClassificationModule):
         max_epochs: int = 600,
         num_classes: int = 10,
         lr_final: float = 1e-5,
-        warmup_epochs: int = 10,
+        warmup_epochs: int = 0,
         label_smoothing: float = 0.0,
     ):
         self.auxiliary_loss_weight = auxiliary_loss_weight
