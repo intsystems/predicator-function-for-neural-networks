@@ -66,11 +66,14 @@ class InferSurrogate:
     def initialize_models(self) -> None:
         """Загружает и инициализирует суррогатные модели для точности и разнообразия."""
         print("Initializing surrogate models...")
-        self.model_accuracy = GAT_ver_1(
-            input_dim=self.config.input_dim,
+        self.model_accuracy = GAT_ver_2(
+            self.config.input_dim,
             output_dim=1,
             dropout=self.config.acc_dropout,
             heads=self.config.acc_n_heads,
+            output_activation="none",
+            pre_norm=True,
+            pooling="attn",
         ).to(self.device)
         state_dict_acc = torch.load(
             self.surrogate_dataset_path / "model_accuracy.pth",
@@ -81,10 +84,12 @@ class InferSurrogate:
         self.model_accuracy.eval()
 
         self.model_diversity = GAT_ver_2(
-            input_dim=self.config.input_dim,
-            output_dim=self.config.div_output_dim,
+            self.config.input_dim,
+            self.config.div_output_dim,
             dropout=self.config.div_dropout,
             heads=self.config.div_n_heads,
+            output_activation="l2",
+            pre_norm=True
         ).to(self.device)
         state_dict_div = torch.load(
             self.surrogate_dataset_path / "model_diversity.pth",

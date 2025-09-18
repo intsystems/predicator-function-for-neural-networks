@@ -24,6 +24,8 @@ from torch_geometric.utils import dropout_edge
 from torch_geometric.nn import GATv2Conv, GraphNorm
 from torch_geometric.nn.aggr import AttentionalAggregation
 
+from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
+
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from Graph import Graph
 
@@ -31,7 +33,7 @@ from Graph import Graph
 class GATBlock(nn.Module):
     """
     - Identity residual, если in_dim == out_dim
-    - Опциональный Pre-Norm (pre_norm=True) или Post-Norm (False)
+    - Поддержка Pre-Norm (до GAT) и Post-Norm (после)
     - ELU по умолчанию
     - DropEdge (edge_dropout > 0)
     """
@@ -58,9 +60,18 @@ class GATBlock(nn.Module):
         self.res_proj = (
             nn.Identity() if in_dim == out_dim else nn.Linear(in_dim, out_dim)
         )
-        self.norm = GraphNorm(out_dim)
         self.dropout = nn.Dropout(dropout)
         self.act = activation if activation is not None else nn.ELU()
+
+        # === Исправление: нормализация зависит от режима ===
+        if pre_norm:
+            # Pre-Norm: нормализуем вход → используем in_dim
+            self.norm_pre = GraphNorm(in_dim)
+            self.norm_post = nn.Identity()  # не нужна после
+        else:
+            # Post-Norm: нормализуем выход → используем out_dim
+            self.norm_pre = nn.Identity()
+            self.norm_post = GraphNorm(out_dim)
 
     def reset_parameters(self):
         self.gat.reset_parameters()
@@ -68,21 +79,29 @@ class GATBlock(nn.Module):
             nn.init.xavier_uniform_(self.res_proj.weight)
             if self.res_proj.bias is not None:
                 nn.init.zeros_(self.res_proj.bias)
+        if hasattr(self, 'norm_post') and isinstance(self.norm_post, GraphNorm):
+            self.norm_post.reset_parameters()
+        if hasattr(self, 'norm_pre') and isinstance(self.norm_pre, GraphNorm):
+            self.norm_pre.reset_parameters()
 
     def forward(self, x, edge_index, batch):
         # Edge dropout (только в train)
         if self.training and self.edge_dropout > 0.0:
             edge_index, _ = dropout_edge(edge_index, p=self.edge_dropout, training=True)
 
-        x_for_gat = self.norm(x, batch) if self.pre_norm else x
+        # === Pre-Norm: до GAT, по in_dim ===
+        x_for_gat = self.norm_pre(x, batch) if isinstance(self.norm_pre, GraphNorm) else x
+
         h = self.gat(x_for_gat, edge_index)
         res = self.res_proj(x)
         h = self.act(h + res)
-        if not self.pre_norm:
-            h = self.norm(h, batch)
+
+        # === Post-Norm: после, по out_dim ===
+        if isinstance(self.norm_post, GraphNorm):
+            h = self.norm_post(h, batch)
+
         h = self.dropout(h)
         return h
-
 
 class GAT_ver_1(nn.Module):
     def __init__(
@@ -90,7 +109,7 @@ class GAT_ver_1(nn.Module):
         input_dim,
         output_dim=16,
         dropout=0.5,
-        pooling="max",
+        pooling="mean",
         heads=4,
         output_activation="none",
     ):
@@ -153,7 +172,7 @@ class GAT_ver_2(nn.Module):
         output_activation: str = "none",
         pooling: str = "attn",
         edge_dropout: float = 0.1,
-        pre_norm: bool = False,
+        pre_norm: bool = True,
     ):
         super().__init__()
         self.hidden_dim = 64
@@ -659,9 +678,7 @@ def save_accuracy_predictions(
                 break
 
             data = data.to(device)
-            prediction = (
-                model(data.x, data.edge_index, data.batch).squeeze().cpu().numpy()
-            )
+            prediction = model(data.x, data.edge_index, data.batch).squeeze().cpu().numpy()
             target = data.y.cpu().numpy()
 
             # Переводим в проценты, если нужно
@@ -673,16 +690,38 @@ def save_accuracy_predictions(
             true_accs.extend(target)
             pred_accs.extend(prediction)
 
-    # Создаём папку
+    true_accs = np.array(true_accs)
+    pred_accs = np.array(pred_accs)
+
+    # === Вычисляем метрики ДО сортировки ===
+    r2 = r2_score(true_accs, pred_accs)
+    mae = mean_absolute_error(true_accs, pred_accs)
+    rmse = np.sqrt(mean_squared_error(true_accs, pred_accs))
+
+    # === Сортируем по убыванию true_acc ===
+    sorted_indices = np.argsort(true_accs)[::-1]  # [::-1] — это и есть убывание
+    true_accs_sorted = true_accs[sorted_indices]
+    pred_accs_sorted = pred_accs[sorted_indices]
+
+    # === Сохраняем: сначала метрики, потом отсортированные данные ===
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
-    # Сохраняем
     with open(file_path, "w", encoding="utf-8") as f:
-        f.write("true_acc pred_acc\n")
-        for true, pred in zip(true_accs, pred_accs):
+        f.write(f"# Accuracy prediction quality metrics\n")
+        f.write(f"R2: {r2:.4f}\n")
+        f.write(f"MAE: {mae:.4f}\n")
+        f.write(f"RMSE: {rmse:.4f}\n")
+        f.write(f"# Number of samples: {len(true_accs)}\n")
+        f.write(f"\n# true_acc pred_acc (sorted by true_acc descending)\n")
+        for true, pred in zip(true_accs_sorted, pred_accs_sorted):
             f.write(f"{true:.4f} {pred:.4f}\n")
 
-    print(f"✅ Saved {len(true_accs)} true/pred pairs to {file_path}")
+    print(f"✅ Saved sorted predictions and metrics to {file_path}")
+    print(f"   R² = {r2:.4f}, MAE = {mae:.4f}, RMSE = {rmse:.4f}")
+    print(f"   Entries sorted by true_acc (descending)")
+
+    return true_accs_sorted, pred_accs_sorted
+
 
 
 def plot_train_valid_losses(

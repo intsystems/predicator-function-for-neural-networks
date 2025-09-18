@@ -1,22 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CONFIG="surrogate_hp_our.json"
+export CUDA_VISIBLE_DEVICES="1,2,3,4,5"
 
-# python train_surrogate.py --hyperparameters_json "$CONFIG"
+CONFIG="surrogate_hp_dev.json"
 
-python inference_surrogate.py --hyperparameters_json "$CONFIG"
-python train_models.py --hyperparameters_json "$CONFIG"
-
-python inference_surrogate.py --hyperparameters_json "$CONFIG"
-python train_models.py --hyperparameters_json "$CONFIG"
+python train_surrogate.py --hyperparameters_json "$CONFIG"
 
 python inference_surrogate.py --hyperparameters_json "$CONFIG"
+
 python train_models.py --hyperparameters_json "$CONFIG"
 
-python inference_surrogate.py --hyperparameters_json "$CONFIG"
-python train_models.py --hyperparameters_json "$CONFIG"
-
-python inference_surrogate.py --hyperparameters_json "$CONFIG"
-python train_models.py --hyperparameters_json "$CONFIG"
-# echo "=== Все этапы успешно завершены ==="
+echo "=== Все этапы успешно завершены ==="
