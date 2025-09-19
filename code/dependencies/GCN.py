@@ -420,7 +420,6 @@ def train_model_diversity(
     device="cpu",
     developer_mode=False,
     final_lr=0.001,
-    draw_figure=False,
     save_path="checkpoints/best_diversity_model.pth",  # путь к чекпоинту
 ):
     model.to(device)
@@ -532,10 +531,9 @@ def train_model_diversity(
             print(f"🧹 Temporary directory '{checkpoint_dir}' removed.")
 
     # === Построение графика ===
-    if draw_figure:
-        tmp_train_losses = np.array(train_losses)
-        tmp_valid_losses = np.array(valid_losses)
-        plot_train_valid_losses(tmp_train_losses, tmp_valid_losses, file_name="diversity_model.png")
+    tmp_train_losses = np.array(train_losses)
+    tmp_valid_losses = np.array(valid_losses)
+    plot_train_valid_losses(tmp_train_losses, tmp_valid_losses, file_name="diversity_model.png")
 
     return train_losses, valid_losses
 

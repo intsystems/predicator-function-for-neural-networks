@@ -227,7 +227,7 @@ class SurrogateTrainer:
             self.config.div_output_dim,
             dropout=self.config.div_dropout,
             heads=self.config.div_n_heads,
-            output_activation="l2",
+            output_activation="none",
             pre_norm=True
         )
         
