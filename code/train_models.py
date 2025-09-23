@@ -78,6 +78,8 @@ class Cutout(object):
         
         return img * mask
 
+def duplicate_channel(x):
+    return x.repeat(3, 1, 1)
 
 
 class DatasetsInfo(object):
@@ -126,11 +128,27 @@ class DatasetsInfo(object):
             "key": "cifar",
             "class": FashionMNIST,
             "num_classes": 10,
-            "mean": [0.2860406],
-            "std": [0.35302424],
+            "mean": [0.2860406, 0.2860406, 0.2860406],
+            "std": [0.35302424, 0.35302424, 0.35302424],
             "img_size": 32,
-            "train_transform": [transforms.Resize(32)],
-            "test_transform": [transforms.Resize(32)],
+            "train_transform": transforms.Compose([
+                transforms.Resize(32),
+                transforms.RandomCrop(32, padding=4, padding_mode='reflect'),
+                transforms.RandomHorizontalFlip(p=0.5),
+                transforms.RandomRotation(5),
+                transforms.ToTensor(),
+                transforms.Lambda(duplicate_channel),
+                transforms.Normalize(mean=[0.2860406, 0.2860406, 0.2860406],
+                                    std=[0.35302424, 0.35302424, 0.35302424]),
+                Cutout(16),
+            ]),
+            "test_transform": transforms.Compose([
+                transforms.Resize(32),
+                transforms.ToTensor(),
+                transforms.Lambda(duplicate_channel),
+                transforms.Normalize(mean=[0.2860406, 0.2860406, 0.2860406],
+                                    std=[0.35302424, 0.35302424, 0.35302424]),
+            ]),
         },
     }
 
@@ -258,6 +276,7 @@ class DiversityNESRunner:
 
             model = model.to(self.device)
             model.apply(self._custom_weight_init)
+            # model = torch.compile(model)
 
             evaluator = Lightning(
                 DartsClassificationModule(
