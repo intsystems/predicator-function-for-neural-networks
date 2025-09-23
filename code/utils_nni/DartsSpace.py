@@ -462,6 +462,8 @@ class NDS_with_CIFAR100(ModelSpace):
             self.num_labels = 10
         elif dataset == 'cifar100':
             self.num_labels = 100
+        elif dataset == "fashionmnist":
+            self.num_labels = 10
         else:  # imagenet
             self.num_labels = 1000
         self.auxiliary_loss = auxiliary_loss
@@ -502,6 +504,22 @@ class NDS_with_CIFAR100(ModelSpace):
             C_pprev = C_prev = 3 * C
             C_curr = C
             last_cell_reduce = False
+        elif dataset == 'fashionmnist':  # Новый блок для FashionMNIST
+            # Специальный стем-слой для FashionMNIST с адаптированными stride
+            self.stem0 = nn.Sequential(
+                MutableConv2d(3, cast(int, C // 2), kernel_size=3, stride=1, padding=1, bias=False),
+                MutableBatchNorm2d(cast(int, C // 2)),
+                nn.ReLU(inplace=True),
+                MutableConv2d(cast(int, C // 2), cast(int, C), 3, stride=1, padding=1, bias=False),
+                MutableBatchNorm2d(C),
+            )
+            self.stem1 = nn.Sequential(
+                nn.ReLU(inplace=True),
+                MutableConv2d(cast(int, C), cast(int, C), 3, stride=2, padding=1, bias=False),
+                MutableBatchNorm2d(C),
+            )
+            C_pprev = C_prev = C_curr = C
+            last_cell_reduce = True
         else:
             raise ValueError(f'Unsupported dataset: {dataset}')
 

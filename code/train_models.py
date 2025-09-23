@@ -78,7 +78,8 @@ class Cutout(object):
         
         return img * mask
 
-
+def duplicate_channel(x):
+    return x.repeat(3, 1, 1)
 
 class DatasetsInfo(object):
     DATASETS = {
@@ -123,14 +124,30 @@ class DatasetsInfo(object):
             ]),
         },
         "fashionmnist": {
-            "key": "cifar",
+            "key": "fashionmnist",
             "class": FashionMNIST,
             "num_classes": 10,
-            "mean": [0.2860406],
-            "std": [0.35302424],
+            "mean": [0.2860406, 0.2860406, 0.2860406],
+            "std": [0.35302424, 0.35302424, 0.35302424],
             "img_size": 32,
-            "train_transform": [transforms.Resize(32)],
-            "test_transform": [transforms.Resize(32)],
+            "train_transform": transforms.Compose([
+                transforms.Resize(32),
+                transforms.RandomCrop(32, padding=4, padding_mode='reflect'),
+                transforms.RandomHorizontalFlip(p=0.5),
+                transforms.RandomRotation(5),
+                transforms.ToTensor(),
+                transforms.Lambda(duplicate_channel),
+                transforms.Normalize(mean=[0.2860406, 0.2860406, 0.2860406],
+                                    std=[0.35302424, 0.35302424, 0.35302424]),
+                Cutout(16),
+            ]),
+            "test_transform": transforms.Compose([
+                transforms.Resize(32),
+                transforms.ToTensor(),
+                transforms.Lambda(duplicate_channel),
+                transforms.Normalize(mean=[0.2860406, 0.2860406, 0.2860406],
+                                    std=[0.35302424, 0.35302424, 0.35302424]),
+            ]),
         },
     }
 
@@ -205,7 +222,7 @@ class DiversityNESRunner:
             valid_subset = None
             valid_loader = None
         else:
-            split = int(num_samples * self.config.train_size)
+            split = int(num_samples * min(0.2, self.config.train_size))
             valid_subset = Subset(train_data, indices[split:])
             valid_loader = DataLoader(
                 valid_subset,
@@ -258,16 +275,18 @@ class DiversityNESRunner:
 
             model = model.to(self.device)
             model.apply(self._custom_weight_init)
+            if torch.__version__ >= "2.0" and self.device.type == "cuda":
+                model = torch.compile(model)
 
             evaluator = Lightning(
                 DartsClassificationModule(
                     learning_rate=self.config.lr_start_final,
-                    weight_decay=3e-4,
-                    auxiliary_loss_weight=0.4,
+                    weight_decay=self.config.weight_decay, 
+                    auxiliary_loss_weight=self.config.auxiliary_loss_weight,
                     max_epochs=self.config.n_epochs_final,
                     num_classes=self.num_classes,
                     lr_final=self.config.lr_end_final,
-                    label_smoothing=0.15
+                    label_smoothing=self.config.label_smoothing
                 ),
                 trainer=Trainer(
                     gradient_clip_val=5.0,
@@ -281,7 +300,7 @@ class DiversityNESRunner:
                     benchmark=True,
                 ),
                 train_dataloaders=train_loader,
-                val_dataloaders=valid_loader,
+                # val_dataloaders=valid_loader,
             )
             evaluator.fit(model)
 
@@ -502,7 +521,7 @@ class DiversityNESRunner:
 
     @staticmethod
     def train_single_model_process(
-        architecture, model_id, physical_gpu_id, config, dataset_key, num_classes
+        architecture, model_id, physical_gpu_id, config, dataset_key, num_classes, evaluate_ensemble_flag
     ):
         os.environ["CUDA_VISIBLE_DEVICES"] = str(physical_gpu_id)
 
@@ -530,7 +549,7 @@ class DiversityNESRunner:
             if model is not None:
                 model = model.to(device)
 
-            if valid_loader is None:
+            if valid_loader is None and evaluate_ensemble_flag:
                 runner.evaluate_and_save_results(
                     model,
                     architecture,
@@ -562,71 +581,76 @@ class DiversityNESRunner:
         except RuntimeError:
             pass
 
-        print("Loading architectures...")
-        if self.config.evaluate_ensemble_flag:
-            latest_index = self.get_latest_index_from_dir()
-            models_json_dir = (
-                Path(self.config.best_models_save_path) / f"models_json_{latest_index}"
-            )
-            arch_dicts = load_json_from_directory(models_json_dir)
-        else:
-            arch_dicts = generate_arch_dicts(self.config.n_models_to_evaluate)
+        # print("Loading architectures...")
+        # last_index = "N/A"  # значение по умолчанию
 
-        archs = [d["architecture"] for d in arch_dicts]
-        n_models = len(archs)
+        # if self.config.evaluate_ensemble_flag:
+        #     try:
+        #         last_index = self.get_latest_index_from_dir()
+        #         models_json_dir = Path(self.config.best_models_save_path) / f"models_json_{last_index}"
+        #         arch_dicts = load_json_from_directory(models_json_dir)
+        #     except Exception as e:
+        #         print(f"Failed to load models: {e}")
+        #         return
+        # else:
+        #     arch_dicts = generate_arch_dicts(self.config.n_models_to_evaluate)
 
-        cuda_visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES", "")
-        if cuda_visible_devices:
-            available_gpus = [int(x.strip()) for x in cuda_visible_devices.split(",")]
-        else:
-            available_gpus = list(range(torch.cuda.device_count()))
+        # archs = [d["architecture"] for d in arch_dicts]
+        # n_models = len(archs)
 
-        n_gpus = len(available_gpus)
-        print(f"Available physical GPUs: {available_gpus}")
-        print(f"Will train {n_models} models using up to {n_gpus} GPUs in parallel.")
+        # cuda_visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+        # if cuda_visible_devices:
+        #     available_gpus = [int(x.strip()) for x in cuda_visible_devices.split(",")]
+        # else:
+        #     available_gpus = list(range(torch.cuda.device_count()))
 
-        output_path = Path(self.config.output_path)
-        (output_path / "trained_models_pth").mkdir(parents=True, exist_ok=True)
-        (output_path / "trained_models_archs").mkdir(parents=True, exist_ok=True)
+        # n_gpus = len(available_gpus)
+        # print(f"Available physical GPUs: {available_gpus}")
+        # print(f"Will train {n_models} models using up to {n_gpus} GPUs in parallel.")
 
-        print(f"Created output directories in {output_path}")
-        print("Starting training...")
+        # output_path = Path(self.config.output_path)
+        # (output_path / "trained_models_pth").mkdir(parents=True, exist_ok=True)
+        # (output_path / "trained_models_archs").mkdir(parents=True, exist_ok=True)
 
-        # === ЗАПУСК С ОГРАНИЧЕНИЕМ: НЕ БОЛЕЕ n_gpus ПРОЦЕССОВ ОДНОВРЕМЕННО ===
-        processes = []
-        active_processes = {}
+        # print(f"Created output directories in {output_path}")
+        # print("Starting training...")
 
-        for idx, arch in enumerate(archs):
-            physical_gpu_id = available_gpus[idx % n_gpus]
+        # # === ЗАПУСК С ОГРАНИЧЕНИЕМ: НЕ БОЛЕЕ n_gpus ПРОЦЕССОВ ОДНОВРЕМЕННО ===
+        # processes = []
+        # active_processes = {}
 
-            while len(processes) >= n_gpus:
-                for p_idx, p in list(active_processes.items()):
-                    if not p.is_alive():
-                        p.join()
-                        processes.remove(p)
-                        del active_processes[p_idx]
-                        break
-                time.sleep(0.5)
+        # for idx, arch in enumerate(archs):
+        #     physical_gpu_id = available_gpus[idx % n_gpus]
 
-            p = mp.get_context("spawn").Process(
-                target=self.train_single_model_process,
-                args=(
-                    arch,
-                    idx,
-                    physical_gpu_id,
-                    self.config,
-                    self.dataset_key,
-                    self.num_classes,
-                ),
-            )
-            p.start()
-            processes.append(p)
-            active_processes[idx] = p
+        #     while len(processes) >= n_gpus:
+        #         for p_idx, p in list(active_processes.items()):
+        #             if not p.is_alive():
+        #                 p.join()
+        #                 processes.remove(p)
+        #                 del active_processes[p_idx]
+        #                 break
+        #         time.sleep(0.5)
 
-            print(f"Started process {idx} on GPU {physical_gpu_id}")
+        #     p = mp.get_context("spawn").Process(
+        #         target=self.train_single_model_process,
+        #         args=(
+        #             arch,
+        #             idx,
+        #             physical_gpu_id,
+        #             self.config,
+        #             self.dataset_key,
+        #             self.num_classes,
+        #             self.config.evaluate_ensemble_flag
+        #         ),
+        #     )
+        #     p.start()
+        #     processes.append(p)
+        #     active_processes[idx] = p
 
-        for p in processes:
-            p.join()
+        #     print(f"Started process {idx} on GPU {physical_gpu_id}")
+
+        # for p in processes:
+        #     p.join()
 
         print("All models trained! Logs saved in 'logs/' directory.")
 

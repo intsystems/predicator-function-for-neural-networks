@@ -49,6 +49,9 @@ class TrainConfig:
     random_choice_out_of_best: bool
     greedy_choice_out_of_best: bool
 
+    weight_decay :float
+    auxiliary_loss_weight: float
+    label_smoothing: float
     n_epochs_final: int
     lr_start_final: float
     lr_end_final: float

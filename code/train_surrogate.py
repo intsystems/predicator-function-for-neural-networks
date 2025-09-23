@@ -45,7 +45,7 @@ class SurrogateTrainer:
         self.device = torch.device(config.device)
         self.dataset_path = Path(config.dataset_path)
 
-    def _prepare_predictions(self, num_samples: Optional[int] = None):
+    def _prepare_predictions(self, num_samples: Optional[int] = 10000):
         preds = []
         for path in tqdm(self.config.models_dict_path, desc="Preparing predictions"):
             with path.open("r", encoding="utf-8") as f:
@@ -59,7 +59,7 @@ class SurrogateTrainer:
             preds.append(arr[:num_samples] if num_samples else arr)
         return preds
 
-    def get_diversity_matrix(self, num_samples: Optional[int] = None) -> None:
+    def get_diversity_matrix(self, num_samples: Optional[int] = 10000) -> None:
         n = self.config.n_models
         self.config.diversity_matrix = np.eye(n)
         preds = self._prepare_predictions(num_samples)
@@ -227,7 +227,7 @@ class SurrogateTrainer:
             self.config.div_output_dim,
             dropout=self.config.div_dropout,
             heads=self.config.div_n_heads,
-            output_activation="none",
+            output_activation="l2",
             pre_norm=True
         )
         

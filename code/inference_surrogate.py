@@ -478,7 +478,7 @@ if __name__ == "__main__":
     inference.initialize_models()
 
     try:
-        inference.run_selection(strategy=strategy) # <<-- Передаем сюда нашу переменную
+        inference.run_selection(strategy=strategy) 
     except ValueError as e:
         print(f"Error during selection: {e}")
         exit(1)
