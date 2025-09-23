@@ -124,7 +124,7 @@ class DatasetsInfo(object):
             ]),
         },
         "fashionmnist": {
-            "key": "fashionmnist",
+            "key": "cifar",
             "class": FashionMNIST,
             "num_classes": 10,
             "mean": [0.2860406, 0.2860406, 0.2860406],
@@ -264,7 +264,7 @@ class DiversityNESRunner:
         torch.manual_seed(seed)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(seed)
-
+            
         try:
             with model_context(architecture):
                 model = DartsSpace(
@@ -581,76 +581,76 @@ class DiversityNESRunner:
         except RuntimeError:
             pass
 
-        # print("Loading architectures...")
-        # last_index = "N/A"  # значение по умолчанию
+        print("Loading architectures...")
+        last_index = "N/A"  # значение по умолчанию
 
-        # if self.config.evaluate_ensemble_flag:
-        #     try:
-        #         last_index = self.get_latest_index_from_dir()
-        #         models_json_dir = Path(self.config.best_models_save_path) / f"models_json_{last_index}"
-        #         arch_dicts = load_json_from_directory(models_json_dir)
-        #     except Exception as e:
-        #         print(f"Failed to load models: {e}")
-        #         return
-        # else:
-        #     arch_dicts = generate_arch_dicts(self.config.n_models_to_evaluate)
+        if self.config.evaluate_ensemble_flag:
+            try:
+                last_index = self.get_latest_index_from_dir()
+                models_json_dir = Path(self.config.best_models_save_path) / f"models_json_{last_index}"
+                arch_dicts = load_json_from_directory(models_json_dir)
+            except Exception as e:
+                print(f"Failed to load models: {e}")
+                return
+        else:
+            arch_dicts = generate_arch_dicts(self.config.n_models_to_evaluate)
 
-        # archs = [d["architecture"] for d in arch_dicts]
-        # n_models = len(archs)
+        archs = [d["architecture"] for d in arch_dicts]
+        n_models = len(archs)
 
-        # cuda_visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES", "")
-        # if cuda_visible_devices:
-        #     available_gpus = [int(x.strip()) for x in cuda_visible_devices.split(",")]
-        # else:
-        #     available_gpus = list(range(torch.cuda.device_count()))
+        cuda_visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+        if cuda_visible_devices:
+            available_gpus = [int(x.strip()) for x in cuda_visible_devices.split(",")]
+        else:
+            available_gpus = list(range(torch.cuda.device_count()))
 
-        # n_gpus = len(available_gpus)
-        # print(f"Available physical GPUs: {available_gpus}")
-        # print(f"Will train {n_models} models using up to {n_gpus} GPUs in parallel.")
+        n_gpus = len(available_gpus)
+        print(f"Available physical GPUs: {available_gpus}")
+        print(f"Will train {n_models} models using up to {n_gpus} GPUs in parallel.")
 
-        # output_path = Path(self.config.output_path)
-        # (output_path / "trained_models_pth").mkdir(parents=True, exist_ok=True)
-        # (output_path / "trained_models_archs").mkdir(parents=True, exist_ok=True)
+        output_path = Path(self.config.output_path)
+        (output_path / "trained_models_pth").mkdir(parents=True, exist_ok=True)
+        (output_path / "trained_models_archs").mkdir(parents=True, exist_ok=True)
 
-        # print(f"Created output directories in {output_path}")
-        # print("Starting training...")
+        print(f"Created output directories in {output_path}")
+        print("Starting training...")
 
-        # # === ЗАПУСК С ОГРАНИЧЕНИЕМ: НЕ БОЛЕЕ n_gpus ПРОЦЕССОВ ОДНОВРЕМЕННО ===
-        # processes = []
-        # active_processes = {}
+        # === ЗАПУСК С ОГРАНИЧЕНИЕМ: НЕ БОЛЕЕ n_gpus ПРОЦЕССОВ ОДНОВРЕМЕННО ===
+        processes = []
+        active_processes = {}
 
-        # for idx, arch in enumerate(archs):
-        #     physical_gpu_id = available_gpus[idx % n_gpus]
+        for idx, arch in enumerate(archs):
+            physical_gpu_id = available_gpus[idx % n_gpus]
 
-        #     while len(processes) >= n_gpus:
-        #         for p_idx, p in list(active_processes.items()):
-        #             if not p.is_alive():
-        #                 p.join()
-        #                 processes.remove(p)
-        #                 del active_processes[p_idx]
-        #                 break
-        #         time.sleep(0.5)
+            while len(processes) >= n_gpus:
+                for p_idx, p in list(active_processes.items()):
+                    if not p.is_alive():
+                        p.join()
+                        processes.remove(p)
+                        del active_processes[p_idx]
+                        break
+                time.sleep(0.5)
 
-        #     p = mp.get_context("spawn").Process(
-        #         target=self.train_single_model_process,
-        #         args=(
-        #             arch,
-        #             idx,
-        #             physical_gpu_id,
-        #             self.config,
-        #             self.dataset_key,
-        #             self.num_classes,
-        #             self.config.evaluate_ensemble_flag
-        #         ),
-        #     )
-        #     p.start()
-        #     processes.append(p)
-        #     active_processes[idx] = p
+            p = mp.get_context("spawn").Process(
+                target=self.train_single_model_process,
+                args=(
+                    arch,
+                    idx,
+                    physical_gpu_id,
+                    self.config,
+                    self.dataset_key,
+                    self.num_classes,
+                    self.config.evaluate_ensemble_flag
+                ),
+            )
+            p.start()
+            processes.append(p)
+            active_processes[idx] = p
 
-        #     print(f"Started process {idx} on GPU {physical_gpu_id}")
+            print(f"Started process {idx} on GPU {physical_gpu_id}")
 
-        # for p in processes:
-        #     p.join()
+        for p in processes:
+            p.join()
 
         print("All models trained! Logs saved in 'logs/' directory.")
 

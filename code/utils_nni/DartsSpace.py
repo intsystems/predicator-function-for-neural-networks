@@ -622,7 +622,7 @@ class NDS_with_CIFAR100(ModelSpace):
         nni.nas.nn.pytorch.MutableModule.freeze
         """
         with model_context(sample):
-            return NDS(
+            return self.__class__(
                 self.op_candidates,
                 self.merge_op,
                 self.num_nodes_per_cell,
