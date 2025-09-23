@@ -42,8 +42,6 @@ class TrainConfig:
     
     tmp_archs_path: str
     best_models_save_path: str
-
-    prepared_dataset_path: str
     evaluate_ensemble_flag: bool
 
     random_choice_out_of_best: bool
