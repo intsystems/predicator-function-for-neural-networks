@@ -50,6 +50,8 @@ class TrainConfig:
     n_epochs_final: int
     lr_start_final: float
     lr_end_final: float
+    weight_decay:float
+    auxiliary_loss_weight:float
     batch_size_final: int
     dataset_name: str
     final_dataset_path: str

@@ -281,8 +281,8 @@ class DiversityNESRunner:
             evaluator = Lightning(
                 DartsClassificationModule(
                     learning_rate=self.config.lr_start_final,
-                    weight_decay=3e-4,
-                    auxiliary_loss_weight=0.4,
+                    weight_decay=self.config.weight_decay,
+                    auxiliary_loss_weight=self.config.auxiliary_loss_weight,
                     max_epochs=self.config.n_epochs_final,
                     num_classes=self.num_classes,
                     lr_final=self.config.lr_end_final,

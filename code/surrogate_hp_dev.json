@@ -45,9 +45,11 @@
     "greedy_choice_out_of_best" : true,
 
 
-    "n_epochs_final": 50,
+    "n_epochs_final": 125,
     "lr_start_final": 0.025,
     "lr_end_final": 1e-3,
+    "weight_decay":3e-4,
+    "auxiliary_loss_weight":0.4,
     "batch_size_final": 96,
     "dataset_name": "FashionMNIST",
 
