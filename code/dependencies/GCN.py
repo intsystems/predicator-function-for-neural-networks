@@ -24,6 +24,11 @@ from torch_geometric.utils import dropout_edge
 from torch_geometric.nn import GATv2Conv, GraphNorm
 from torch_geometric.nn.aggr import AttentionalAggregation
 
+from functools import lru_cache
+import tempfile
+from typing import Optional, List
+from pathlib import Path
+
 from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -295,7 +300,6 @@ class GAT_ver_2(nn.Module):
 class CustomDataset(Dataset):
     @staticmethod
     def preprocess(adj, features):
-        """Transforms the adjacency matrix and features into tensors."""
         adj = torch.tensor(adj, dtype=torch.float)
         features = torch.tensor(features, dtype=torch.float)
         return adj, features
@@ -306,32 +310,105 @@ class CustomDataset(Dataset):
         adj, features = CustomDataset.preprocess(adj, features)
         return graph.index, adj, features
 
-    def __init__(self, models_dict_path, accuracies=None, use_tqdm=False):
+    def __init__(
+        self,
+        models_dict_path: List[Path],
+        accuracies: Optional[List[float]] = None,
+        max_cache: int = 10000,
+        use_tqdm: bool = True,
+        cache_dir: Optional[str] = None,
+    ):
+        """
+        Args:
+            models_dict_path: список путей к .json файлам
+            accuracies: список точностей (опционально)
+            max_cache: сколько графов держать в RAM-кэше (LRU)
+            use_tqdm: показывать прогресс
+            cache_dir: папка для .pt файлов. Если None — создаст временную.
+        """
         self.models_dict_path = models_dict_path
-
         self.accuracies = (
             torch.tensor(accuracies, dtype=torch.float)
             if accuracies is not None
             else None
         )
+        self.max_cache = max_cache
+
+        self._temp_dir = None
+        if cache_dir is None:
+            self._temp_dir = tempfile.TemporaryDirectory(prefix="graph_cache_")
+            self.pt_dir = Path(self._temp_dir.name)
+        else:
+            self.pt_dir = Path(cache_dir)
+            self.pt_dir.mkdir(parents=True, exist_ok=True)
+            self._temp_dir = None  # не удаляем вручную
+
+        # === Конвертируем .json → .pt, если ещё не сделано ===
+        self._convert_all_to_pt(use_tqdm)
+
+        # === LRU-кэш для загрузки графов из .pt ===
+        self._cached_load = lru_cache(maxsize=self.max_cache)(self._load_from_pt)
+
+    def _convert_all_to_pt(self, use_tqdm: bool = False):
+        to_convert = [
+            (json_path, self.pt_dir / (json_path.stem + ".pt"))
+            for json_path in self.models_dict_path
+        ]
+        to_convert = [(j, p) for j, p in to_convert if not p.exists()]
+
+        if not to_convert:
+            if use_tqdm:
+                print("✅ Все .pt файлы уже существуют.")
+            return
+
+        from tqdm import tqdm
+
+        iterator = tqdm(to_convert, desc="Converting JSON → PT") if use_tqdm else to_convert
+
+        for json_path, pt_path in iterator:
+            with json_path.open("r", encoding="utf-8") as f:
+                model_dict = json.load(f)
+            graph = Graph(model_dict, index=json_path.name)
+            _, adj, features = self.process_graph(graph)
+            edge_index, _ = dense_to_sparse(adj)
+
+            torch.save({"edge_index": edge_index, "x": features}, pt_path)
+
+    def _load_from_pt(self, pt_path: Path):
+        """Загружает edge_index и x из .pt. Кэшируется."""
+        data = torch.load(pt_path, map_location="cpu")
+        return data["edge_index"], data["x"]
 
     def __getitem__(self, index):
-        path = self.models_dict_path[index]
-        with path.open("r", encoding="utf-8") as f:
-            model_dict = json.load(f)
-        graph = Graph(model_dict, index=index)
-        _, adj, features = self.process_graph(graph)
-        edge_index, _ = dense_to_sparse(adj)
+        json_path = self.models_dict_path[index]
+        pt_path = self.pt_dir / (json_path.stem + ".pt")
+
+        edge_index, features = self._cached_load(pt_path)
 
         data = Data(x=features, edge_index=edge_index)
         data.index = index
+
         if self.accuracies is not None:
             data.y = self.accuracies[index]
+
         return data
 
     def __len__(self):
         return len(self.models_dict_path)
 
+    def clear_cache(self):
+        self._cached_load.cache_clear()
+
+    def __del__(self):
+        """Очистка временных ресурсов при удалении датасета."""
+        self.clear_cache()
+
+        if self._temp_dir is not None:
+            try:
+                self._temp_dir.cleanup()
+                print(f"🧹 Временная директория кэша удалена: {self.pt_dir}")
+            except Exception as e:
+                print(f"⚠️ Не удалось удалить временную директорию: {e}")
 
 class TripletGraphDataset(Dataset):
     def __init__(self, base_dataset, diversity_matrix):

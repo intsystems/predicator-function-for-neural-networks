@@ -1,6 +1,6 @@
 {
     "seed":-1,
-    "num_workers": 16,
+    "num_workers": 32,
     "dataset_path": "datasets/fashionmnist_archs",
     "device": "cuda:1",
     "developer_mode": false,
@@ -15,7 +15,7 @@
     "batch_size": 8,
     "input_dim":8,
 
-    "acc_num_epochs": 75,
+    "acc_num_epochs": 65,
     "acc_lr_start": 1e-2,
     "acc_lr_end": 1e-7,
     "acc_dropout": 0,
@@ -24,9 +24,9 @@
     "div_num_epochs": 40,
     "div_lr_start": 5e-5,
     "div_lr_end": 1e-7,
-    "div_dropout": 0.1,
+    "div_dropout": 0.2,
     "div_n_heads":4,
-    "margin": 1,
+    "margin": 10,
     "div_output_dim": 16,
 
     "surrogate_inference_path": "surrogate_models/",
