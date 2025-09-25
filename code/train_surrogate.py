@@ -266,7 +266,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     params = json.loads(Path(args.hyperparameters_json).read_text())
-    # params.update({"device": "cuda" if torch.cuda.is_available() else "cpu"})
     config = TrainConfig(**params)
 
     trainer = SurrogateTrainer(config)
@@ -280,9 +279,9 @@ if __name__ == "__main__":
     trainer.create_datasets()
     print("Creating dataloaders")
     trainer.create_dataloaders()
-    print("Training accuracy surrogate")
-    trainer.train_accuracy_model()
     print("Training diversity surrogate")
     trainer.train_diversity_model()
+    print("Training accuracy surrogate")
+    trainer.train_accuracy_model()
     print("Saving models")
     trainer.save_models()

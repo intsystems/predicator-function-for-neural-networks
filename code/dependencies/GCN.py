@@ -24,9 +24,7 @@ from torch_geometric.utils import dropout_edge
 from torch_geometric.nn import GATv2Conv, GraphNorm
 from torch_geometric.nn.aggr import AttentionalAggregation
 
-from functools import lru_cache
-import tempfile
-from typing import Optional, List
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
@@ -84,9 +82,9 @@ class GATBlock(nn.Module):
             nn.init.xavier_uniform_(self.res_proj.weight)
             if self.res_proj.bias is not None:
                 nn.init.zeros_(self.res_proj.bias)
-        if hasattr(self, 'norm_post') and isinstance(self.norm_post, GraphNorm):
+        if hasattr(self, "norm_post") and isinstance(self.norm_post, GraphNorm):
             self.norm_post.reset_parameters()
-        if hasattr(self, 'norm_pre') and isinstance(self.norm_pre, GraphNorm):
+        if hasattr(self, "norm_pre") and isinstance(self.norm_pre, GraphNorm):
             self.norm_pre.reset_parameters()
 
     def forward(self, x, edge_index, batch):
@@ -95,7 +93,9 @@ class GATBlock(nn.Module):
             edge_index, _ = dropout_edge(edge_index, p=self.edge_dropout, training=True)
 
         # === Pre-Norm: до GAT, по in_dim ===
-        x_for_gat = self.norm_pre(x, batch) if isinstance(self.norm_pre, GraphNorm) else x
+        x_for_gat = (
+            self.norm_pre(x, batch) if isinstance(self.norm_pre, GraphNorm) else x
+        )
 
         h = self.gat(x_for_gat, edge_index)
         res = self.res_proj(x)
@@ -107,6 +107,7 @@ class GATBlock(nn.Module):
 
         h = self.dropout(h)
         return h
+
 
 class GAT_ver_1(nn.Module):
     def __init__(
@@ -297,118 +298,87 @@ class GAT_ver_2(nn.Module):
             return out
 
 
+# ВАЖНО: функция должна быть в глобальной области, чтобы multiprocessing мог её сериализовать
+def load_single_graph(args: tuple):
+    json_path_str, idx, accuracies = args
+    try:
+        json_path = Path(json_path_str)
+
+        model_dict = json.loads(json_path.read_text(encoding="utf-8"))
+
+        graph = Graph(model_dict, index=idx)
+        adj, _, features = (
+            graph.get_adjacency_matrix()
+        )  # предполагаем: adj и features — list или np.array
+
+        adj = np.array(adj)
+        features = np.array(features)
+
+        edge_index = np.stack(np.nonzero(adj)).tolist()
+
+        result = {
+            "idx": idx,
+            "x": features.astype(
+                np.float32
+            ).tolist(),  # или .tolist() для JSON-совместимости
+            "edge_index": edge_index,
+            "y": float(accuracies[idx]) if accuracies is not None else None,
+        }
+        return result
+    except Exception as e:
+        print(f"Error loading {json_path_str}: {e}")
+        return None
+
+
 class CustomDataset(Dataset):
-    @staticmethod
-    def preprocess(adj, features):
-        adj = torch.tensor(adj, dtype=torch.float)
-        features = torch.tensor(features, dtype=torch.float)
-        return adj, features
-
-    @staticmethod
-    def process_graph(graph):
-        adj, _, features = graph.get_adjacency_matrix()
-        adj, features = CustomDataset.preprocess(adj, features)
-        return graph.index, adj, features
-
     def __init__(
         self,
-        models_dict_path: List[Path],
-        accuracies: Optional[List[float]] = None,
-        max_cache: int = 10000,
+        models_dict_path,
+        accuracies=None,
         use_tqdm: bool = True,
-        cache_dir: Optional[str] = None,
+        num_workers=None,
     ):
-        """
-        Args:
-            models_dict_path: список путей к .json файлам
-            accuracies: список точностей (опционально)
-            max_cache: сколько графов держать в RAM-кэше (LRU)
-            use_tqdm: показывать прогресс
-            cache_dir: папка для .pt файлов. Если None — создаст временную.
-        """
-        self.models_dict_path = models_dict_path
-        self.accuracies = (
-            torch.tensor(accuracies, dtype=torch.float)
-            if accuracies is not None
-            else None
-        )
-        self.max_cache = max_cache
+        super().__init__()
+        self.data_list = []
+        self.accuracies = accuracies
 
-        self._temp_dir = None
-        if cache_dir is None:
-            self._temp_dir = tempfile.TemporaryDirectory(prefix="graph_cache_")
-            self.pt_dir = Path(self._temp_dir.name)
-        else:
-            self.pt_dir = Path(cache_dir)
-            self.pt_dir.mkdir(parents=True, exist_ok=True)
-            self._temp_dir = None  # не удаляем вручную
+        if num_workers is None:
+            num_workers = min(16, os.cpu_count() or 1)
 
-        # === Конвертируем .json → .pt, если ещё не сделано ===
-        self._convert_all_to_pt(use_tqdm)
+        tasks = [(str(p), idx, accuracies) for idx, p in enumerate(models_dict_path)]
 
-        # === LRU-кэш для загрузки графов из .pt ===
-        self._cached_load = lru_cache(maxsize=self.max_cache)(self._load_from_pt)
+        print(f"🔄 Загрузка {len(tasks)} графов с {num_workers} процессами...")
+        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+            results = list(
+                tqdm(
+                    executor.map(load_single_graph, tasks),
+                    total=len(tasks),
+                    desc="Loading graphs (parallel)",
+                )
+                if use_tqdm
+                else executor.map(load_single_graph, tasks)
+            )
 
-    def _convert_all_to_pt(self, use_tqdm: bool = False):
-        to_convert = [
-            (json_path, self.pt_dir / (json_path.stem + ".pt"))
-            for json_path in self.models_dict_path
-        ]
-        to_convert = [(j, p) for j, p in to_convert if not p.exists()]
+        self.data_list = []
+        for res in results:
+            if res is None:
+                continue
+            x = torch.tensor(res["x"], dtype=torch.float)
+            edge_index = torch.tensor(res["edge_index"], dtype=torch.long)
+            data = Data(x=x, edge_index=edge_index)
+            data.index = res["idx"]
+            if res["y"] is not None:
+                data.y = res["y"]
+            self.data_list.append(data)
 
-        if not to_convert:
-            if use_tqdm:
-                print("✅ Все .pt файлы уже существуют.")
-            return
-
-        from tqdm import tqdm
-
-        iterator = tqdm(to_convert, desc="Converting JSON → PT") if use_tqdm else to_convert
-
-        for json_path, pt_path in iterator:
-            with json_path.open("r", encoding="utf-8") as f:
-                model_dict = json.load(f)
-            graph = Graph(model_dict, index=json_path.name)
-            _, adj, features = self.process_graph(graph)
-            edge_index, _ = dense_to_sparse(adj)
-
-            torch.save({"edge_index": edge_index, "x": features}, pt_path)
-
-    def _load_from_pt(self, pt_path: Path):
-        """Загружает edge_index и x из .pt. Кэшируется."""
-        data = torch.load(pt_path, map_location="cpu")
-        return data["edge_index"], data["x"]
-
-    def __getitem__(self, index):
-        json_path = self.models_dict_path[index]
-        pt_path = self.pt_dir / (json_path.stem + ".pt")
-
-        edge_index, features = self._cached_load(pt_path)
-
-        data = Data(x=features, edge_index=edge_index)
-        data.index = index
-
-        if self.accuracies is not None:
-            data.y = self.accuracies[index]
-
-        return data
+        print(f"✅ Успешно загружено {len(self.data_list)} графов в RAM.")
 
     def __len__(self):
-        return len(self.models_dict_path)
+        return len(self.data_list)
 
-    def clear_cache(self):
-        self._cached_load.cache_clear()
+    def __getitem__(self, idx):
+        return self.data_list[idx]
 
-    def __del__(self):
-        """Очистка временных ресурсов при удалении датасета."""
-        self.clear_cache()
-
-        if self._temp_dir is not None:
-            try:
-                self._temp_dir.cleanup()
-                print(f"🧹 Временная директория кэша удалена: {self.pt_dir}")
-            except Exception as e:
-                print(f"⚠️ Не удалось удалить временную директорию: {e}")
 
 class TripletGraphDataset(Dataset):
     def __init__(self, base_dataset, diversity_matrix):
@@ -512,7 +482,7 @@ def train_model_diversity(
     else:
         temp_dir_created = False
 
-    best_valid_loss = float('inf')
+    best_valid_loss = float("inf")
 
     try:
         for epoch in tqdm(range(num_epochs), desc="Training Progress"):
@@ -523,7 +493,9 @@ def train_model_diversity(
             running_loss = 0.0
             n_batches = 0
 
-            for i, (anchor_batch, pos_batch, neg_batch, idx_triplet) in enumerate(train_loader):
+            for i, (anchor_batch, pos_batch, neg_batch, idx_triplet) in enumerate(
+                train_loader
+            ):
                 if developer_mode and i > 0:
                     break
 
@@ -535,7 +507,9 @@ def train_model_diversity(
                 neg_batch = neg_batch.to(device)
 
                 # Forward pass
-                emb_anchor = model(anchor_batch.x, anchor_batch.edge_index, anchor_batch.batch)
+                emb_anchor = model(
+                    anchor_batch.x, anchor_batch.edge_index, anchor_batch.batch
+                )
                 emb_pos = model(pos_batch.x, pos_batch.edge_index, pos_batch.batch)
                 emb_neg = model(neg_batch.x, neg_batch.edge_index, neg_batch.batch)
 
@@ -559,7 +533,9 @@ def train_model_diversity(
             n_val_batches = 0
 
             with torch.no_grad():
-                for i, (anchor_batch, pos_batch, neg_batch, idx_triplet) in enumerate(valid_loader):
+                for i, (anchor_batch, pos_batch, neg_batch, idx_triplet) in enumerate(
+                    valid_loader
+                ):
                     if developer_mode and i > 0:
                         break
 
@@ -567,7 +543,9 @@ def train_model_diversity(
                     pos_batch = pos_batch.to(device)
                     neg_batch = neg_batch.to(device)
 
-                    emb_anchor = model(anchor_batch.x, anchor_batch.edge_index, anchor_batch.batch)
+                    emb_anchor = model(
+                        anchor_batch.x, anchor_batch.edge_index, anchor_batch.batch
+                    )
                     emb_pos = model(pos_batch.x, pos_batch.edge_index, pos_batch.batch)
                     emb_neg = model(neg_batch.x, neg_batch.edge_index, neg_batch.batch)
 
@@ -582,7 +560,9 @@ def train_model_diversity(
             if avg_valid_loss < best_valid_loss:
                 best_valid_loss = avg_valid_loss
                 torch.save(model.state_dict(), save_path)
-                print(f"✅ Best diversity model saved to {save_path} (Valid Loss: {avg_valid_loss:.4f})")
+                print(
+                    f"✅ Best diversity model saved to {save_path} (Valid Loss: {avg_valid_loss:.4f})"
+                )
 
             # === Логирование ===
             lr = scheduler.get_last_lr()[0]
@@ -612,10 +592,11 @@ def train_model_diversity(
     if draw_figure:
         tmp_train_losses = np.array(train_losses)
         tmp_valid_losses = np.array(valid_losses)
-        plot_train_valid_losses(tmp_train_losses, tmp_valid_losses, file_name="diversity_model.png")
+        plot_train_valid_losses(
+            tmp_train_losses, tmp_valid_losses, file_name="diversity_model.png"
+        )
 
     return train_losses, valid_losses
-
 
 
 def train_model_accuracy(
@@ -644,7 +625,7 @@ def train_model_accuracy(
     else:
         temp_dir_created = False
 
-    best_valid_loss = float('inf')
+    best_valid_loss = float("inf")
 
     try:
         for epoch in tqdm(range(num_epochs), desc="Training Progress"):
@@ -698,7 +679,9 @@ def train_model_accuracy(
             if avg_valid_loss < best_valid_loss:
                 best_valid_loss = avg_valid_loss
                 torch.save(model.state_dict(), save_path)
-                print(f"✅ Best model saved to {save_path} (Valid Loss: {avg_valid_loss * 1e4:.4f})")
+                print(
+                    f"✅ Best model saved to {save_path} (Valid Loss: {avg_valid_loss * 1e4:.4f})"
+                )
 
             lr = scheduler.get_last_lr()[0]
             print(
@@ -737,7 +720,6 @@ def train_model_accuracy(
     return train_losses, valid_losses
 
 
-
 def save_accuracy_predictions(
     model,
     data_loader,
@@ -755,7 +737,9 @@ def save_accuracy_predictions(
                 break
 
             data = data.to(device)
-            prediction = model(data.x, data.edge_index, data.batch).squeeze().cpu().numpy()
+            prediction = (
+                model(data.x, data.edge_index, data.batch).squeeze().cpu().numpy()
+            )
             target = data.y.cpu().numpy()
 
             # Переводим в проценты, если нужно
@@ -798,7 +782,6 @@ def save_accuracy_predictions(
     print(f"   Entries sorted by true_acc (descending)")
 
     return true_accs_sorted, pred_accs_sorted
-
 
 
 def plot_train_valid_losses(

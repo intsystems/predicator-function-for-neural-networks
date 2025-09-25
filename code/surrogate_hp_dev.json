@@ -1,32 +1,32 @@
 {
-    "seed":-1,
-    "num_workers": 32,
+    "seed":42,
+    "num_workers": 4,
     "dataset_path": "datasets/fashionmnist_archs",
     "device": "cuda:1",
     "developer_mode": false,
 
     "n_models": 785,
 
-    "upper_margin": 0.85,
-    "lower_margin": 0.15,
+    "upper_margin": 0.8,
+    "lower_margin": 0.2,
     "diversity_matrix_metric": "overlap", 
 
     "train_size": 0.8,
     "batch_size": 8,
     "input_dim":8,
 
-    "acc_num_epochs": 65,
+    "acc_num_epochs": 75,
     "acc_lr_start": 1e-2,
     "acc_lr_end": 1e-7,
     "acc_dropout": 0,
     "acc_n_heads": 8,
 
-    "div_num_epochs": 40,
-    "div_lr_start": 5e-5,
+    "div_num_epochs": 50,
+    "div_lr_start": 5e-4,
     "div_lr_end": 1e-7,
-    "div_dropout": 0.2,
-    "div_n_heads":4,
-    "margin": 10,
+    "div_dropout": 0.1,
+    "div_n_heads":8,
+    "margin": 1,
     "div_output_dim": 16,
 
     "surrogate_inference_path": "surrogate_models/",
@@ -36,13 +36,13 @@
     "n_models_in_pool": 4096,
     "n_models_to_generate": 1024000,
     "batch_size_inference": 4096,
-    "min_accuracy_for_pool": 0.897,
+    "min_accuracy_for_pool": 0.898,
     "acc_distance_gamma":1,
     "min_acc_and_div_to_ensemble": 0.1,
     "best_models_save_path": "best_models/",
     "tmp_archs_path": "datasets/tmp_archs/",
     "random_choice_out_of_best" : false,
-    "greedy_choice_out_of_best" : true,
+    "greedy_choice_out_of_best" : false,
 
 
     "n_epochs_final": 125,
