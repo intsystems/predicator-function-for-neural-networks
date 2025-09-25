@@ -331,53 +331,45 @@ def load_single_graph(args: tuple):
 
 
 class CustomDataset(Dataset):
-    def __init__(
-        self,
-        models_dict_path,
-        accuracies=None,
-        use_tqdm: bool = True,
-        num_workers=None,
-    ):
-        super().__init__()
-        self.data_list = []
-        self.accuracies = accuracies
+    @staticmethod
+    def preprocess(adj, features):
+        """Transforms the adjacency matrix and features into tensors."""
+        adj = torch.tensor(adj, dtype=torch.float)
+        features = torch.tensor(features, dtype=torch.float)
+        return adj, features
 
-        if num_workers is None:
-            num_workers = min(16, os.cpu_count() or 1)
+    @staticmethod
+    def process_graph(graph):
+        adj, _, features = graph.get_adjacency_matrix()
+        adj, features = CustomDataset.preprocess(adj, features)
+        return graph.index, adj, features
 
-        tasks = [(str(p), idx, accuracies) for idx, p in enumerate(models_dict_path)]
+    def __init__(self, models_dict_path, accuracies=None, use_tqdm=False):
+        self.models_dict_path = models_dict_path
 
-        print(f"🔄 Загрузка {len(tasks)} графов с {num_workers} процессами...")
-        with ProcessPoolExecutor(max_workers=num_workers) as executor:
-            results = list(
-                tqdm(
-                    executor.map(load_single_graph, tasks),
-                    total=len(tasks),
-                    desc="Loading graphs (parallel)",
-                )
-                if use_tqdm
-                else executor.map(load_single_graph, tasks)
-            )
+        self.accuracies = (
+            torch.tensor(accuracies, dtype=torch.float)
+            if accuracies is not None
+            else None
+        )
 
-        self.data_list = []
-        for res in results:
-            if res is None:
-                continue
-            x = torch.tensor(res["x"], dtype=torch.float)
-            edge_index = torch.tensor(res["edge_index"], dtype=torch.long)
-            data = Data(x=x, edge_index=edge_index)
-            data.index = res["idx"]
-            if res["y"] is not None:
-                data.y = res["y"]
-            self.data_list.append(data)
+    def __getitem__(self, index):
+        path = self.models_dict_path[index]
+        with path.open("r", encoding="utf-8") as f:
+            model_dict = json.load(f)
+        graph = Graph(model_dict, index=index)
+        _, adj, features = self.process_graph(graph)
+        edge_index, _ = dense_to_sparse(adj)
 
-        print(f"✅ Успешно загружено {len(self.data_list)} графов в RAM.")
+        data = Data(x=features, edge_index=edge_index)
+        data.index = index
+        if self.accuracies is not None:
+            data.y = self.accuracies[index]
+        return data
 
     def __len__(self):
-        return len(self.data_list)
+        return len(self.models_dict_path)
 
-    def __getitem__(self, idx):
-        return self.data_list[idx]
 
 
 class TripletGraphDataset(Dataset):
