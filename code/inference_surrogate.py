@@ -137,7 +137,7 @@ class InferSurrogate:
                 n_near_centroid=1
             )
             # Опционально: нарисовать t-SNE
-            if self.config.draw_tsne:
+            if self.config.developer_mode:
                  self.paint_tsne(
                     self.potential_embeddings, 
                     self.potential_accuracies, # Передаем accs для полной картины
@@ -273,21 +273,22 @@ class InferSurrogate:
 
             cluster_embs = embs[idxs_in_cluster]
             
-            # Вычисляем расстояния до центроида и находим n ближайших
+            # Вычисляем расстояния до центроида
             dists = np.linalg.norm(cluster_embs - centroids[cluster_id], axis=1)
             sorted_local_indices = np.argsort(dists)[:n_near_centroid]
-            
-            # Получаем глобальные индексы лучших моделей
-            global_indices = idxs_in_cluster[sorted_local_indices]
-            
-            for global_idx in global_indices:
+
+            # Выбираем ближайшие модели
+            for local_idx in sorted_local_indices:
+                global_idx = idxs_in_cluster[local_idx]
+                distance = dists[local_idx]  # ← локальный индекс
+
                 selected_archs.append(archs[global_idx])
                 selected_embs.append(embs[global_idx])
                 selected_indices.append(global_idx)
-                
+
                 print(
                     f"Selected model from cluster {cluster_id} "
-                    f"(dist to centroid: {dists[global_idx]:.2f})"
+                    f"(dist to centroid: {distance:.2f})"
                 )
 
         return selected_archs, selected_embs, selected_indices
