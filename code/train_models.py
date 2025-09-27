@@ -219,11 +219,11 @@ class DiversityNESRunner:
         np.random.shuffle(indices)
 
         if self.config.evaluate_ensemble_flag:
-            split = num_samples
+            split = int(num_samples * self.config.train_size)
             valid_subset = None
             valid_loader = None
         else:
-            split = int(num_samples * self.config.train_size)
+            split = int(num_samples * max(0.8, self.config.train_size))
             valid_subset = Subset(train_data, indices[split:])
             valid_loader = DataLoader(
                 valid_subset,
@@ -657,7 +657,8 @@ class DiversityNESRunner:
             print(f"\nEvaluating ensemble at index {last_index}...")
             stats = self.collect_ensemble_stats(test_loader)
             self.finalize_ensemble_evaluation(stats, f"ensemble_results_{last_index}")
-
+        else:
+            last_index = "N/A"
         print(
             f"\nAll pretrained models from index {last_index} evaluated successfully!"
         )

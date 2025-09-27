@@ -3,7 +3,7 @@
     "num_workers": 20,
     "dataset_path": "datasets/fashionmnist_archs",
     "device": "cuda:1",
-    "developer_mode": true,
+    "developer_mode": false,
 
     "n_models": 785,
 
@@ -11,17 +11,17 @@
     "lower_margin": 0.2,
     "diversity_matrix_metric": "overlap", 
 
-    "train_size": 0.1,
+    "train_size": 0.2,
     "batch_size": 8,
     "input_dim":8,
 
-    "acc_num_epochs": 75,
+    "acc_num_epochs": 100,
     "acc_lr_start": 1e-2,
     "acc_lr_end": 1e-7,
     "acc_dropout": 0,
     "acc_n_heads": 8,
 
-    "div_num_epochs": 50,
+    "div_num_epochs": 100,
     "div_lr_start": 5e-4,
     "div_lr_end": 1e-7,
     "div_dropout": 0.1,
@@ -42,10 +42,10 @@
     "best_models_save_path": "best_models/",
     "tmp_archs_path": "datasets/tmp_archs/",
     "random_choice_out_of_best" : false,
-    "greedy_choice_out_of_best" : true,
+    "greedy_choice_out_of_best" : false,
 
 
-    "n_epochs_final": 125,
+    "n_epochs_final": 2,
     "lr_start_final": 0.025,
     "lr_end_final": 1e-3,
     "weight_decay":3e-4,
@@ -54,8 +54,8 @@
     "dataset_name": "FashionMNIST",
 
     "final_dataset_path": "datasets/final_dataset/",
-    "evaluate_ensemble_flag": true,
-    "n_models_to_evaluate":10,
+    "evaluate_ensemble_flag": false,
+    "n_models_to_evaluate":1000,
     "output_path": "output/",
     "width": 16,
     "num_cells": 3,
