@@ -11,7 +11,7 @@
     "lower_margin": 0.2,
     "diversity_matrix_metric": "overlap", 
 
-    "train_size": 0.2,
+    "train_size": 0.16,
     "batch_size": 8,
     "input_dim":8,
 
@@ -45,17 +45,18 @@
     "greedy_choice_out_of_best" : false,
 
 
-    "n_epochs_final": 2,
+    "n_epochs_final": 100,
     "lr_start_final": 0.025,
     "lr_end_final": 1e-3,
     "weight_decay":3e-4,
     "auxiliary_loss_weight":0.4,
     "batch_size_final": 96,
     "dataset_name": "FashionMNIST",
+    "max_per_gpu": 10,
 
     "final_dataset_path": "datasets/final_dataset/",
     "evaluate_ensemble_flag": false,
-    "n_models_to_evaluate":1000,
+    "n_models_to_evaluate":2000,
     "output_path": "output/",
     "width": 16,
     "num_cells": 3,
