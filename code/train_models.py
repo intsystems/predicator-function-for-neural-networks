@@ -32,6 +32,7 @@ from dependencies.data_generator import generate_arch_dicts
 
 # === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
 
+
 def load_json_from_directory(directory_path: Path) -> List[dict]:
     """
     Загружает все JSON-файлы из директории и её поддиректорий.
@@ -60,6 +61,7 @@ def load_json_from_directory(directory_path: Path) -> List[dict]:
 
 class Cutout:
     """Apply cutout to an image tensor."""
+
     def __init__(self, length: int):
         self.length = length
 
@@ -91,8 +93,10 @@ def duplicate_channel(x: torch.Tensor) -> torch.Tensor:
 
 # === ИНФОРМАЦИЯ О ДАТАСЕТАХ ===
 
+
 class DatasetsInfo:
     """Конфигурация датасетов: трансформации, нормализация, классы."""
+
     DATASETS = {
         "cifar10": {
             "key": "cifar",
@@ -101,18 +105,26 @@ class DatasetsInfo:
             "mean": [0.4914, 0.4822, 0.4465],
             "std": [0.2470, 0.2435, 0.2616],
             "img_size": 32,
-            "train_transform": transforms.Compose([
-                transforms.RandomCrop(32, padding=4),
-                transforms.RandomHorizontalFlip(),
-                transforms.AutoAugment(transforms.AutoAugmentPolicy.CIFAR10),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.4914, 0.4822, 0.4465], std=[0.2470, 0.2435, 0.2616]),
-                Cutout(16),
-            ]),
-            "test_transform": transforms.Compose([
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.4914, 0.4822, 0.4465], std=[0.2470, 0.2435, 0.2616]),
-            ]),
+            "train_transform": transforms.Compose(
+                [
+                    transforms.RandomCrop(32, padding=4),
+                    transforms.RandomHorizontalFlip(),
+                    transforms.AutoAugment(transforms.AutoAugmentPolicy.CIFAR10),
+                    transforms.ToTensor(),
+                    transforms.Normalize(
+                        mean=[0.4914, 0.4822, 0.4465], std=[0.2470, 0.2435, 0.2616]
+                    ),
+                    Cutout(16),
+                ]
+            ),
+            "test_transform": transforms.Compose(
+                [
+                    transforms.ToTensor(),
+                    transforms.Normalize(
+                        mean=[0.4914, 0.4822, 0.4465], std=[0.2470, 0.2435, 0.2616]
+                    ),
+                ]
+            ),
         },
         "cifar100": {
             "key": "cifar100",
@@ -121,18 +133,26 @@ class DatasetsInfo:
             "mean": [0.5071, 0.4867, 0.4408],
             "std": [0.2673, 0.2564, 0.2762],
             "img_size": 32,
-            "train_transform": transforms.Compose([
-                transforms.RandomCrop(32, padding=4),
-                transforms.RandomHorizontalFlip(),
-                transforms.AutoAugment(transforms.AutoAugmentPolicy.CIFAR10),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.5071, 0.4867, 0.4408], std=[0.2673, 0.2564, 0.2762]),
-                Cutout(16),
-            ]),
-            "test_transform": transforms.Compose([
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.5071, 0.4867, 0.4408], std=[0.2673, 0.2564, 0.2762]),
-            ]),
+            "train_transform": transforms.Compose(
+                [
+                    transforms.RandomCrop(32, padding=4),
+                    transforms.RandomHorizontalFlip(),
+                    transforms.AutoAugment(transforms.AutoAugmentPolicy.CIFAR10),
+                    transforms.ToTensor(),
+                    transforms.Normalize(
+                        mean=[0.5071, 0.4867, 0.4408], std=[0.2673, 0.2564, 0.2762]
+                    ),
+                    Cutout(16),
+                ]
+            ),
+            "test_transform": transforms.Compose(
+                [
+                    transforms.ToTensor(),
+                    transforms.Normalize(
+                        mean=[0.5071, 0.4867, 0.4408], std=[0.2673, 0.2564, 0.2762]
+                    ),
+                ]
+            ),
         },
         "fashionmnist": {
             "key": "cifar",
@@ -141,22 +161,26 @@ class DatasetsInfo:
             "mean": [0.2860406] * 3,
             "std": [0.35302424] * 3,
             "img_size": 32,
-            "train_transform": transforms.Compose([
-                transforms.Resize(32),
-                transforms.RandomCrop(32, padding=4, padding_mode='reflect'),
-                transforms.RandomHorizontalFlip(p=0.5),
-                transforms.RandomRotation(5),
-                transforms.ToTensor(),
-                transforms.Lambda(duplicate_channel),
-                transforms.Normalize(mean=[0.2860406] * 3, std=[0.35302424] * 3),
-                Cutout(16),
-            ]),
-            "test_transform": transforms.Compose([
-                transforms.Resize(32),
-                transforms.ToTensor(),
-                transforms.Lambda(duplicate_channel),
-                transforms.Normalize(mean=[0.2860406] * 3, std=[0.35302424] * 3),
-            ]),
+            "train_transform": transforms.Compose(
+                [
+                    transforms.Resize(32),
+                    transforms.RandomCrop(32, padding=4, padding_mode="reflect"),
+                    transforms.RandomHorizontalFlip(p=0.5),
+                    transforms.RandomRotation(5),
+                    transforms.ToTensor(),
+                    transforms.Lambda(duplicate_channel),
+                    transforms.Normalize(mean=[0.2860406] * 3, std=[0.35302424] * 3),
+                    Cutout(16),
+                ]
+            ),
+            "test_transform": transforms.Compose(
+                [
+                    transforms.Resize(32),
+                    transforms.ToTensor(),
+                    transforms.Lambda(duplicate_channel),
+                    transforms.Normalize(mean=[0.2860406] * 3, std=[0.35302424] * 3),
+                ]
+            ),
         },
     }
 
@@ -165,11 +189,14 @@ class DatasetsInfo:
         """Возвращает конфигурацию датасета."""
         dataset_name = dataset_name.lower()
         if dataset_name not in cls.DATASETS:
-            raise ValueError(f"Unknown dataset: {dataset_name}. Available: {list(cls.DATASETS.keys())}")
+            raise ValueError(
+                f"Unknown dataset: {dataset_name}. Available: {list(cls.DATASETS.keys())}"
+            )
         return cls.DATASETS[dataset_name]
 
 
 # === ОСНОВНОЙ КЛАСС ===
+
 
 class DiversityNESRunner:
     def __init__(self, config: TrainConfig, info: Dict[str, Any]):
@@ -186,9 +213,13 @@ class DiversityNESRunner:
 
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
-        self.device = torch.device(config.device if torch.cuda.is_available() else "cpu")
+        self.device = torch.device(
+            config.device if torch.cuda.is_available() else "cpu"
+        )
 
-    def get_data_loaders(self, batch_size: Optional[int] = None, seed: Optional[int] = None) -> Tuple[DataLoader, Optional[DataLoader], DataLoader]:
+    def get_data_loaders(
+        self, batch_size: Optional[int] = None, seed: Optional[int] = None
+    ) -> Tuple[DataLoader, Optional[DataLoader], DataLoader]:
         """Создаёт загрузчики данных."""
         bs = batch_size or self.config.batch_size_final
         dataset_cls = self.dataset_cls
@@ -213,15 +244,15 @@ class DiversityNESRunner:
 
         split = int(num_samples * self.config.train_size)
         train_subset = Subset(train_data, indices[:split])
-        train_loader = DataLoader(train_subset, batch_size=bs, num_workers=0, shuffle=True)
+        train_loader = DataLoader(
+            train_subset, batch_size=bs, num_workers=0, shuffle=True
+        )
 
-        # if self.config.evaluate_ensemble_flag:
-        #     valid_loader = None
-        # else:
-        #     split_valid = int(num_samples * max(0.9, self.config.train_size))
-        #     valid_subset = Subset(train_data, indices[split_valid:])
-        #     valid_loader = DataLoader(valid_subset, batch_size=bs, num_workers=0, shuffle=False)
-        valid_loader = None
+        split_valid = int(num_samples * max(0.9, self.config.train_size))
+        valid_subset = Subset(train_data, indices[split_valid:])
+        valid_loader = DataLoader(
+            valid_subset, batch_size=bs, num_workers=0, shuffle=False
+        )
 
         test_loader = DataLoader(test_data, batch_size=bs, num_workers=0, shuffle=False)
         return train_loader, valid_loader, test_loader
@@ -234,7 +265,13 @@ class DiversityNESRunner:
             if module.bias is not None:
                 torch.nn.init.zeros_(module.bias)
 
-    def train_model(self, architecture: dict, train_loader: DataLoader, valid_loader: Optional[DataLoader], model_id: int) -> Optional[torch.nn.Module]:
+    def train_model(
+        self,
+        architecture: dict,
+        train_loader: DataLoader,
+        valid_loader: Optional[DataLoader],
+        model_id: int,
+    ) -> Optional[torch.nn.Module]:
         """Обучает одну модель по архитектуре."""
         seed = self.config.seed + model_id
         random.seed(seed)
@@ -252,6 +289,10 @@ class DiversityNESRunner:
                 )
             model = model.to(self.device)
             model.apply(self._custom_weight_init)
+
+            tmp_valid_loader = (
+                valid_loader if self.config.evaluate_ensemble_flag else None
+            )
 
             evaluator = Lightning(
                 DartsClassificationModule(
@@ -275,7 +316,7 @@ class DiversityNESRunner:
                     benchmark=True,
                 ),
                 train_dataloaders=train_loader,
-                val_dataloaders=valid_loader,
+                val_dataloaders=tmp_valid_loader,
             )
             evaluator.fit(model)
             model = model.to(self.device)
@@ -293,7 +334,15 @@ class DiversityNESRunner:
             print(f"Error training model {model_id}: {e}")
             return None
 
-    def evaluate_and_save_results(self, model: torch.nn.Module, architecture: dict, data_loader: DataLoader, folder_name: str, model_id: int, mode: str = "class") -> None:
+    def evaluate_and_save_results(
+        self,
+        model: torch.nn.Module,
+        architecture: dict,
+        data_loader: DataLoader,
+        folder_name: str,
+        model_id: int,
+        mode: str = "class",
+    ) -> None:
         """Оценивает модель и сохраняет предсказания."""
         device = next(model.parameters()).device
         model.eval()
@@ -308,7 +357,11 @@ class DiversityNESRunner:
                 _, predicted = torch.max(outputs, 1)
                 correct += (predicted == labels).sum().item()
                 total += labels.size(0)
-                preds = outputs.cpu().tolist() if mode == "logits" else predicted.cpu().tolist()
+                preds = (
+                    outputs.cpu().tolist()
+                    if mode == "logits"
+                    else predicted.cpu().tolist()
+                )
                 predictions.extend(preds)
 
         accuracy = correct / total
@@ -326,7 +379,9 @@ class DiversityNESRunner:
             json.dump(result, f, indent=4)
         print(f"Results for model_{model_id} saved to {file_path}")
 
-    def collect_ensemble_stats(self, test_loader: DataLoader) -> Optional[Dict[str, Any]]:
+    def collect_ensemble_stats(
+        self, test_loader: DataLoader
+    ) -> Optional[Dict[str, Any]]:
         """Собирает статистику для ансамбля: точность, ECE."""
         valid_models = [m for m in self.models if m is not None]
         if not valid_models:
@@ -393,7 +448,9 @@ class DiversityNESRunner:
             "num_models": len(valid_models),
         }
 
-    def finalize_ensemble_evaluation(self, stats: Optional[Dict[str, Any]], file_name: str = "ensemble_results") -> Tuple[Optional[float], Optional[List[float]], Optional[float]]:
+    def finalize_ensemble_evaluation(
+        self, stats: Optional[Dict[str, Any]], file_name: str = "ensemble_results"
+    ) -> Tuple[Optional[float], Optional[List[float]], Optional[float]]:
         """Финализирует оценку ансамбля: вычисляет метрики и сохраняет результаты."""
         if stats is None:
             return None, None, None
@@ -456,14 +513,25 @@ class DiversityNESRunner:
         if not candidates:
             raise FileNotFoundError(f"No models_json_* directories in {base_path}")
 
-        indices = [int(m.group(1)) for p in candidates if (m := re.search(r"models_json_(\d+)", str(p)))]
+        indices = [
+            int(m.group(1))
+            for p in candidates
+            if (m := re.search(r"models_json_(\d+)", str(p)))
+        ]
         if not indices:
             raise ValueError("No valid indices in models_json_* directories")
 
         return max(indices)
 
     @staticmethod
-    def train_single_model_process(architecture: dict, model_id: int, physical_gpu_id: int, config: TrainConfig, dataset_key: str, num_classes: int):
+    def train_single_model_process(
+        architecture: dict,
+        model_id: int,
+        physical_gpu_id: int,
+        config: TrainConfig,
+        dataset_key: str,
+        num_classes: int,
+    ):
         """Целевой процесс для параллельного обучения."""
         os.environ["CUDA_VISIBLE_DEVICES"] = str(physical_gpu_id)
 
@@ -474,16 +542,22 @@ class DiversityNESRunner:
             torch.set_float32_matmul_precision("high")
 
             device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-            runner = DiversityNESRunner(config, DatasetsInfo.get(config.dataset_name.lower()))
+            runner = DiversityNESRunner(
+                config, DatasetsInfo.get(config.dataset_name.lower())
+            )
             train_loader, valid_loader, test_loader = runner.get_data_loaders()
 
-            model = runner.train_model(architecture, train_loader, valid_loader, model_id)
+            model = runner.train_model(
+                architecture, train_loader, valid_loader, model_id
+            )
             if model is not None:
                 model = model.to(device)
 
-            eval_loader = test_loader if valid_loader is None else valid_loader
+            eval_loader = valid_loader
             eval_folder = Path(config.output_path) / "trained_models_archs"
-            runner.evaluate_and_save_results(model, architecture, eval_loader, str(eval_folder), model_id=model_id)
+            runner.evaluate_and_save_results(
+                model, architecture, eval_loader, str(eval_folder), model_id=model_id
+            )
 
         except Exception as e:
             print(f"Error in process {model_id}: {e}")
@@ -570,14 +644,20 @@ class DiversityNESRunner:
                 )
             model.to(self.device)
             pth_file = pth_dir / f"model_{model_id}.pth"
-            model.load_state_dict(torch.load(pth_file, map_location=self.device, weights_only=True))
+            model.load_state_dict(
+                torch.load(pth_file, map_location=self.device, weights_only=True)
+            )
             self.models.append(model)
 
             if not self.config.evaluate_ensemble_flag:
                 self.evaluate_and_save_results(
-                    model, arch, valid_loader,
-                    folder_name=str(Path(self.config.output_path) / f"trained_models_archs_{index}"),
-                    model_id=model_id
+                    model,
+                    arch,
+                    valid_loader,
+                    folder_name=str(
+                        Path(self.config.output_path) / f"trained_models_archs_{index}"
+                    ),
+                    model_id=model_id,
                 )
 
         if self.config.evaluate_ensemble_flag:
@@ -594,7 +674,9 @@ class DiversityNESRunner:
 
         last_index = self.get_latest_index_from_dir(root_dir)
         for idx in range(1, last_index + 1):
-            if (root_dir / f"models_json_{idx}").exists() and (root_dir / f"models_pth_{idx}").exists():
+            if (root_dir / f"models_json_{idx}").exists() and (
+                root_dir / f"models_pth_{idx}"
+            ).exists():
                 self.run_pretrained(idx)
                 self.models = []  # очистка после каждого индекса
             else:
@@ -610,7 +692,9 @@ class DiversityNESRunner:
         print("Loading architectures...")
         if self.config.evaluate_ensemble_flag:
             latest_index = self.get_latest_index_from_dir()
-            models_json_dir = Path(self.config.best_models_save_path) / f"models_json_{latest_index}"
+            models_json_dir = (
+                Path(self.config.best_models_save_path) / f"models_json_{latest_index}"
+            )
             arch_dicts = load_json_from_directory(models_json_dir)
         else:
             arch_dicts = generate_arch_dicts(self.config.n_models_to_evaluate)
@@ -639,7 +723,14 @@ class DiversityNESRunner:
 
             p = mp.get_context("spawn").Process(
                 target=self.train_single_model_process,
-                args=(arch, idx, physical_gpu_id, self.config, self.dataset_key, self.num_classes),
+                args=(
+                    arch,
+                    idx,
+                    physical_gpu_id,
+                    self.config,
+                    self.dataset_key,
+                    self.num_classes,
+                ),
             )
             p.start()
             processes.append(p)
