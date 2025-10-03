@@ -690,14 +690,11 @@ class DiversityNESRunner:
             pass
 
         print("Loading architectures...")
-        if self.config.evaluate_ensemble_flag:
-            latest_index = self.get_latest_index_from_dir()
-            models_json_dir = (
-                Path(self.config.best_models_save_path) / f"models_json_{latest_index}"
-            )
-            arch_dicts = load_json_from_directory(models_json_dir)
-        else:
-            arch_dicts = generate_arch_dicts(self.config.n_models_to_evaluate)
+        latest_index = self.get_latest_index_from_dir()
+        models_json_dir = (
+            Path(self.config.best_models_save_path) / f"models_json_{latest_index}"
+        )
+        arch_dicts = load_json_from_directory(models_json_dir)
 
         archs = [d["architecture"] for d in arch_dicts]
         n_models = len(archs)
