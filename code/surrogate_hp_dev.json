@@ -1,11 +1,11 @@
 {
     "seed":42,
     "num_workers": 20,
-    "dataset_path": "datasets/fashionmnist_archs",
+    "dataset_path": "datasets/fashionmnist_united_archs/architectures",
     "device": "cuda:1",
     "developer_mode": false,
 
-    "n_models": 785,
+    "n_models": 2785,
 
     "upper_margin": 0.8,
     "lower_margin": 0.2,

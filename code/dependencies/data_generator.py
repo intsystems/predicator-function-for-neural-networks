@@ -129,13 +129,6 @@ def load_dataset(config) -> None:
     for file_path in tqdm(config.dataset_path.rglob("*.json"), desc="Loading dataset"):
         config.models_dict_path.append(file_path)
 
-    if len(config.models_dict_path) < config.n_models:
-        raise ValueError(
-            f"Only {len(config.models_dict_path)} model paths found, but n_models={config.n_models}"
-        )
-
-    config.models_dict_path = random.sample(config.models_dict_path, config.n_models)
-
 
 def load_dataset_on_inference(config) -> None:
     config.dataset_path = Path(config.prepared_dataset_path)

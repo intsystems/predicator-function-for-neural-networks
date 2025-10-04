@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
+from numba import njit, prange
 from tqdm import tqdm
 import argparse
 import torch
@@ -44,6 +45,7 @@ class SurrogateTrainer:
         self.config = config
         self.device = torch.device(config.device)
         self.dataset_path = Path(config.dataset_path)
+        self.n_models = len(config.models_dict_path)
 
     def _prepare_predictions(self, num_samples: Optional[int] = None):
         preds = []
@@ -59,26 +61,29 @@ class SurrogateTrainer:
             preds.append(arr[:num_samples] if num_samples else arr)
         return preds
 
-    def get_diversity_matrix(self, num_samples: Optional[int] = None) -> None:
-        n = self.config.n_models
-        self.config.diversity_matrix = np.eye(n)
+    def get_diversity_matrix(self, num_samples: Optional[int] = 5500) -> None:
+        n = self.n_models 
         preds = self._prepare_predictions(num_samples)
-        for i in tqdm(range(n), desc="Computing diversity matrix (i loop)"):
-            for j in range(i + 1, n):
-                if self.config.diversity_matrix_metric == "overlap":
-                    dist = np.mean(preds[i] == preds[j])
-                elif self.config.diversity_matrix_metric == "js":
-                    dist = np.mean(distance.jensenshannon(preds[i], preds[j], axis=1))
-                self.config.diversity_matrix[i, j] = self.config.diversity_matrix[
-                    j, i
-                ] = dist
+        if self.config.diversity_matrix_metric == "overlap":
+            arr = np.stack(preds)
+            self.config.diversity_matrix = compute_overlap_diversity_matrix(arr)
+        else:
+            self.config.diversity_matrix = np.eye(n)
+            for i in tqdm(range(n), desc="Computing diversity matrix (i loop)"):
+                for j in range(i + 1, n):
+                    if self.config.diversity_matrix_metric == "js":
+                        dist = np.mean(distance.jensenshannon(preds[i], preds[j], axis=1))
+                    self.config.diversity_matrix[i, j] = self.config.diversity_matrix[
+                        j, i
+                    ] = dist
         self.log_diversities()
+
 
     def log_diversities(self):
         os.makedirs("logs/", exist_ok=True)
         diversities = []
-        for i in tqdm(range(self.config.n_models)):
-            for j in range(i + 1, self.config.n_models):
+        for i in tqdm(range(self.n_models )):
+            for j in range(i + 1, self.n_models ):
                 diversities.append(self.config.diversity_matrix[i, j])
         diversities = np.array(diversities)
 
@@ -144,9 +149,9 @@ class SurrogateTrainer:
     def create_datasets(self) -> None:
         accs = self.get_accuracies()
         ds = CustomDataset(self.config.models_dict_path, accs)
-        train_n = int(self.config.train_size * self.config.n_models)
+        train_n = int(self.config.train_size * self.n_models )
         self.config.base_train_dataset, self.config.base_valid_dataset = random_split(
-            ds, [train_n, self.config.n_models - train_n]
+            ds, [train_n, self.n_models  - train_n]
         )
         self.config.train_dataset = TripletGraphDataset(
             self.config.base_train_dataset, self.config.discrete_diversity_matrix
@@ -259,6 +264,17 @@ class SurrogateTrainer:
             path / "model_diversity.pth",
         )
 
+@njit(parallel=True)
+def compute_overlap_diversity_matrix(preds):
+    n = preds.shape[0]
+    M = np.eye(n)
+    for i in prange(n):
+        for j in range(i + 1, n):
+            dist = np.mean(preds[i] == preds[j])
+            M[i, j] = M[j, i] = dist
+    return M
+
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Surrogate trainer")
@@ -268,9 +284,10 @@ if __name__ == "__main__":
     params = json.loads(Path(args.hyperparameters_json).read_text())
     config = TrainConfig(**params)
 
+    load_dataset(config)
+
     trainer = SurrogateTrainer(config)
     print("Loading models")
-    load_dataset(config)
     print("Getting diversity matrix")
     trainer.get_diversity_matrix()
     print("Creating discrete diversity matrix")
