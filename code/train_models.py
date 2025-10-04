@@ -242,13 +242,13 @@ class DiversityNESRunner:
         np.random.seed(seed or self.config.seed)
         np.random.shuffle(indices)
 
-        split = int(num_samples * self.config.train_size)
+        split = int(num_samples * self.config.train_size_final)
         train_subset = Subset(train_data, indices[:split])
         train_loader = DataLoader(
             train_subset, batch_size=bs, num_workers=0, shuffle=True
         )
 
-        split_valid = int(num_samples * max(0.9, self.config.train_size))
+        split_valid = int(num_samples * max(0.9, self.config.train_size_final))
         valid_subset = Subset(train_data, indices[split_valid:])
         valid_loader = DataLoader(
             valid_subset, batch_size=bs, num_workers=0, shuffle=False
