@@ -21,13 +21,13 @@ DARTS_OPS = [
 
 def generate_cells(num_nodes, name="normal", operations=DARTS_OPS, rng=None):
     cells = dict()
-    
+
     for i in range(num_nodes - 1):
         cur_indexes = list(range(0, i + 2))
 
         if rng is None:
             random_op_0, random_op_1 = random.choices(operations, k=2)
-        elif hasattr(rng, 'choices'):
+        elif hasattr(rng, "choices"):
             random_op_0, random_op_1 = rng.choices(operations, k=2)
         else:
             random_op_0 = operations[int(rng.integers(0, len(operations)))]
@@ -35,9 +35,9 @@ def generate_cells(num_nodes, name="normal", operations=DARTS_OPS, rng=None):
 
         if rng is None:
             random_index_0, random_index_1 = random.sample(cur_indexes, k=2)
-        elif hasattr(rng, 'sample'):
+        elif hasattr(rng, "sample"):
             random_index_0, random_index_1 = rng.sample(cur_indexes, k=2)
-        elif hasattr(rng, 'choice'):
+        elif hasattr(rng, "choice"):
             indices = rng.choice(cur_indexes, size=2, replace=False, shuffle=True)
             random_index_0, random_index_1 = int(indices[0]), int(indices[1])
         else:
@@ -59,22 +59,24 @@ def generate_cells(num_nodes, name="normal", operations=DARTS_OPS, rng=None):
 def generate_single_architecture(seed=None):
     if seed is None:
         seed = np.random.SeedSequence().generate_state(1)[0]
-    
+
     rng = np.random.Generator(np.random.PCG64(seed))
-    
+
     normal_cell = generate_cells(5, name="normal", rng=rng)
     reduction_cell = generate_cells(5, name="reduce", rng=rng)
-    
+
     tmp_dict = {**normal_cell, **reduction_cell}
     return {"architecture": tmp_dict, "seed": int(seed)}
+
 
 def generate_unique_seeds(N_MODELS, low=1, high=int(1e9)):
     seeds = set()
     rng = np.random.default_rng()
     while len(seeds) < N_MODELS:
-        print(f"preparing random seeds, progress:{len(seeds)}/{N_MODELS}", end='\r')
+        print(f"preparing random seeds, progress:{len(seeds)}/{N_MODELS}", end="\r")
         seeds.add(int(rng.integers(low, high)))
     return list(seeds)
+
 
 def generate_arch_dicts(N_MODELS, use_tqdm=False, n_jobs=None, batch_size=100):
     if n_jobs is None:
@@ -84,20 +86,23 @@ def generate_arch_dicts(N_MODELS, use_tqdm=False, n_jobs=None, batch_size=100):
 
     def chunks(lst, n):
         for i in range(0, len(lst), n):
-            yield lst[i:i+n]
+            yield lst[i : i + n]
 
     def safe_generate_batch(seed_batch):
         return [generate_single_architecture(seed=s) for s in seed_batch]
 
     batches = list(chunks(seeds, batch_size))
-    iterable = tqdm(batches, desc="Generating batches", total=len(batches)) if use_tqdm else batches
+    iterable = (
+        tqdm(batches, desc="Generating batches", total=len(batches))
+        if use_tqdm
+        else batches
+    )
 
     results = Parallel(n_jobs=n_jobs, backend="loky")(
         delayed(safe_generate_batch)(batch) for batch in iterable
     )
 
     return [arch for batch in results for arch in batch]
-
 
 
 def mutate_architectures(
@@ -123,11 +128,30 @@ def mutate_architectures(
 
 
 def load_dataset(config) -> None:
-    config.dataset_path = Path(config.dataset_path)
+    config.acc_dataset_path = Path(config.acc_dataset_path)
+    config.div_dataset_path = Path(config.div_dataset_path)
 
-    config.models_dict_path = []
-    for file_path in tqdm(config.dataset_path.rglob("*.json"), desc="Loading dataset"):
-        config.models_dict_path.append(file_path)
+    # Для acc
+    acc_json_files = list(config.acc_dataset_path.rglob("*.json"))
+    if not acc_json_files:
+        raise FileNotFoundError(f"No JSON files found in {config.acc_dataset_path}")
+
+    config.acc_models_dict_path = []
+    for file_path in tqdm(
+        acc_json_files, desc=f"Loading {config.n_models} random ACC models"
+    ):
+        config.acc_models_dict_path.append(file_path)
+
+    # Для div
+    div_json_files = list(config.div_dataset_path.rglob("*.json"))
+    if not div_json_files:
+        raise FileNotFoundError(f"No JSON files found in {config.div_dataset_path}")
+
+    config.div_models_dict_path = []
+    for file_path in tqdm(
+        div_json_files, desc=f"Loading {config.n_models} random DIV models"
+    ):
+        config.div_models_dict_path.append(file_path)
 
 
 def load_dataset_on_inference(config) -> None:

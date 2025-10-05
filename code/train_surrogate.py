@@ -45,11 +45,14 @@ class SurrogateTrainer:
         self.config = config
         self.device = torch.device(config.device)
         self.dataset_path = Path(config.dataset_path)
-        self.n_models = len(config.models_dict_path)
+        self.acc_n_models = len(config.acc_models_dict_path)
+        self.div_n_models = len(config.div_models_dict_path)
 
     def _prepare_predictions(self, num_samples: Optional[int] = None):
         preds = []
-        for path in tqdm(self.config.models_dict_path, desc="Preparing predictions"):
+        for path in tqdm(
+            self.config.div_models_dict_path, desc="Preparing predictions"
+        ):
             with path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
             prediction_name = (
@@ -62,28 +65,25 @@ class SurrogateTrainer:
         return preds
 
     def get_diversity_matrix(self, num_samples: Optional[int] = 5500) -> None:
-        n = self.n_models 
+        n = self.div_n_models
         preds = self._prepare_predictions(num_samples)
+
         if self.config.diversity_matrix_metric == "overlap":
-            arr = np.stack(preds)
+            arr = np.stack(preds)  # shape: (n, num_samples)
             self.config.diversity_matrix = compute_overlap_diversity_matrix(arr)
+        elif self.config.diversity_matrix_metric == "js":
+            arr = np.stack(preds)  # shape: (n, num_samples, n_classes)
+            self.config.diversity_matrix = compute_js_diversity_matrix(arr)
         else:
             self.config.diversity_matrix = np.eye(n)
-            for i in tqdm(range(n), desc="Computing diversity matrix (i loop)"):
-                for j in range(i + 1, n):
-                    if self.config.diversity_matrix_metric == "js":
-                        dist = np.mean(distance.jensenshannon(preds[i], preds[j], axis=1))
-                    self.config.diversity_matrix[i, j] = self.config.diversity_matrix[
-                        j, i
-                    ] = dist
-        self.log_diversities()
 
+        self.log_diversities()
 
     def log_diversities(self):
         os.makedirs("logs/", exist_ok=True)
         diversities = []
-        for i in tqdm(range(self.n_models )):
-            for j in range(i + 1, self.n_models ):
+        for i in tqdm(range(self.div_n_models)):
+            for j in range(i + 1, self.div_n_models):
                 diversities.append(self.config.diversity_matrix[i, j])
         diversities = np.array(diversities)
 
@@ -113,9 +113,14 @@ class SurrogateTrainer:
         D[M < lower[:, None]] = -1
         self.config.discrete_diversity_matrix = D
 
-    def get_accuracies(self):
+    def get_accuracies(self, acc=True):
         accs = []
-        for path in self.config.models_dict_path:
+        dict_path = (
+            self.config.acc_models_dict_path
+            if acc
+            else self.config.div_models_dict_path
+        )
+        for path in dict_path:
             with path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
             accs.append(
@@ -123,7 +128,8 @@ class SurrogateTrainer:
                 if "valid_accuracy" in data
                 else data["test_accuracy"]
             )
-        self.log_accuracies(accs)
+        if acc:
+            self.log_accuracies(accs)
         accs = np.array(accs) * 100
         return accs
 
@@ -147,20 +153,31 @@ class SurrogateTrainer:
         plt.close()
 
     def create_datasets(self) -> None:
-        accs = self.get_accuracies()
-        ds = CustomDataset(self.config.models_dict_path, accs)
-        train_n = int(self.config.train_size * self.n_models )
+        # acc surrogate
+        acc_accs = self.get_accuracies(acc=True)
+        acc_ds = CustomDataset(self.config.acc_models_dict_path, acc_accs)
+        acc_train_n = int(self.config.train_size * self.acc_n_models)
         self.config.base_train_dataset, self.config.base_valid_dataset = random_split(
-            ds, [train_n, self.n_models  - train_n]
+            acc_ds, [acc_train_n, self.acc_n_models - acc_train_n]
         )
-        self.config.train_dataset = TripletGraphDataset(
-            self.config.base_train_dataset, self.config.discrete_diversity_matrix
+
+        # diversity surrogate triplets
+        div_accs = self.get_accuracies(acc=False)
+        div_ds = CustomDataset(self.config.div_models_dict_path, div_accs)
+        div_train_n = int(self.config.train_size * self.div_n_models)
+        div_train, div_valid = random_split(
+            div_ds, [div_train_n, self.div_n_models - div_train_n]
         )
-        self.config.valid_dataset = TripletGraphDataset(
-            self.config.base_valid_dataset, self.config.discrete_diversity_matrix
+        div_train_triplet = TripletGraphDataset(
+            div_train, self.config.discrete_diversity_matrix
         )
+        div_valid_triplet = TripletGraphDataset(
+            div_valid, self.config.discrete_diversity_matrix
+        )
+        self.config.train_dataset = div_train_triplet
+        self.config.valid_dataset = div_valid_triplet
         self.config.full_triplet_dataset = TripletGraphDataset(
-            ds, self.config.discrete_diversity_matrix
+            div_ds, self.config.discrete_diversity_matrix
         )
 
     def create_dataloaders(self) -> None:
@@ -233,9 +250,9 @@ class SurrogateTrainer:
             dropout=self.config.div_dropout,
             heads=self.config.div_n_heads,
             output_activation="l2",
-            pre_norm=True
+            pre_norm=True,
         )
-        
+
         opt = torch.optim.AdamW(
             self.config.model_diversity.parameters(), lr=self.config.div_lr_start
         )
@@ -264,6 +281,7 @@ class SurrogateTrainer:
             path / "model_diversity.pth",
         )
 
+
 @njit(parallel=True)
 def compute_overlap_diversity_matrix(preds):
     n = preds.shape[0]
@@ -274,6 +292,56 @@ def compute_overlap_diversity_matrix(preds):
             M[i, j] = M[j, i] = dist
     return M
 
+
+@njit
+def kl_divergence(p, q):
+    kl = 0.0
+    for i in range(len(p)):
+        if p[i] > 0 and q[i] > 0:
+            kl += p[i] * np.log(p[i] / q[i])
+    return kl
+
+
+@njit
+def jensen_shannon_divergence(p, q):
+    m = (p + q) * 0.5
+    return 0.5 * kl_divergence(p, m) + 0.5 * kl_divergence(q, m)
+
+
+@njit(parallel=True)
+def compute_overlap_diversity_matrix(preds):
+    n = preds.shape[0]
+    M = np.eye(n)
+    for i in prange(n):
+        for j in range(i + 1, n):
+            dist = np.mean(preds[i] == preds[j])
+            M[i, j] = M[j, i] = dist
+    return M
+
+
+@njit
+def compute_js_row(probs_i, probs_rest):
+    """Вычисляет JS-дивергенции между probs_i и всеми в probs_rest."""
+    n_models_rest, n_samples, n_classes = probs_rest.shape
+    js_vals = np.empty(n_models_rest, dtype=np.float32)
+    for j in range(n_models_rest):
+        js_sum = 0.0
+        for s in range(n_samples):
+            js_sum += jensen_shannon_divergence(probs_i[s], probs_rest[j, s])
+        js_vals[j] = js_sum / n_samples
+    return js_vals
+
+
+def compute_js_diversity_matrix(probs):
+    n_models = probs.shape[0]
+    M = np.zeros((n_models, n_models), dtype=np.float32)
+
+    for i in tqdm(range(n_models), desc="Computing JS diversity matrix"):
+        if i + 1 < n_models:
+            row_vals = compute_js_row(probs[i], probs[i + 1 :])
+            M[i, i + 1 :] = row_vals
+            M[i + 1 :, i] = row_vals
+    return M
 
 
 if __name__ == "__main__":

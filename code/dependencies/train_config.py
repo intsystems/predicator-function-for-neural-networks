@@ -1,13 +1,13 @@
 from dataclasses import dataclass, field
-from typing import Optional, Any
+from typing import Optional, Any, List
 import random
 import torch
 import numpy as np
 
-
 @dataclass
 class TrainConfig:
     dataset_path: str
+
     device: str
     developer_mode: bool
     n_models: int
@@ -37,8 +37,8 @@ class TrainConfig:
     n_models_to_generate: int
     batch_size_inference: int
     min_accuracy_for_pool: float
-    acc_distance_gamma:float
-    min_acc_and_div_to_ensemble:float
+    acc_distance_gamma: float
+    min_acc_and_div_to_ensemble: float
     
     tmp_archs_path: str
     best_models_save_path: str
@@ -52,8 +52,8 @@ class TrainConfig:
     n_epochs_final: int
     lr_start_final: float
     lr_end_final: float
-    weight_decay:float
-    auxiliary_loss_weight:float
+    weight_decay: float
+    auxiliary_loss_weight: float
     batch_size_final: int
     dataset_name: str
     final_dataset_path: str
@@ -69,7 +69,14 @@ class TrainConfig:
     # Internal fields
     model_accuracy: Optional[Any] = field(default=None, init=False)
     model_diversity: Optional[Any] = field(default=None, init=False)
-    models_dict_path: list = field(default_factory=list, init=False)
+    models_dict_path: List = field(default_factory=list, init=False)
+    acc_dataset_path: Optional[str] = None
+    div_dataset_path: Optional[str] = None
+    acc_models_dict_path: List = field(default_factory=list, init=False)    # путь до файлов acc
+    div_models_dict_path: List = field(default_factory=list, init=False)    # путь до файлов div
+    acc_models_dicts: List = field(default_factory=list, init=False)        # загруженные словари acc, если нужно
+    div_models_dicts: List = field(default_factory=list, init=False)        # загруженные словари div, если нужно
+
     diversity_matrix: Optional[np.ndarray] = field(default=None, init=False)
     discrete_diversity_matrix: Optional[np.ndarray] = field(default=None, init=False)
     base_train_dataset: Optional[Any] = field(default=None, init=False)
@@ -98,7 +105,7 @@ class TrainConfig:
         ), "Margins must satisfy 0 ≤ lower < upper ≤ 1"
         assert 0 <= self.train_size <= 1, "train_size must be in [0,1]"
         
-        if self.seed == -1:
+        if self.seed == -1 or self.seed is None:
             self.seed = np.random.randint(9999999)
 
         random.seed(self.seed)

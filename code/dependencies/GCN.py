@@ -26,6 +26,7 @@ from torch_geometric.nn.aggr import AttentionalAggregation
 
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
+import collections
 
 from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 
@@ -333,7 +334,6 @@ def load_single_graph(args: tuple):
 class CustomDataset(Dataset):
     @staticmethod
     def preprocess(adj, features):
-        """Transforms the adjacency matrix and features into tensors."""
         adj = torch.tensor(adj, dtype=torch.float)
         features = torch.tensor(features, dtype=torch.float)
         return adj, features
@@ -510,6 +510,9 @@ def train_model_diversity(
 
                 running_loss += loss.item()
                 n_batches += 1
+                if i==0:  # только для первого батча
+                    print(f"Mean d(a, p): {(emb_anchor-emb_pos).norm(dim=1).mean().item():.4f}")
+                    print(f"Mean d(a, n): {(emb_anchor-emb_neg).norm(dim=1).mean().item():.4f}")
 
             scheduler.step()
             avg_train_loss = running_loss / max(1, n_batches)

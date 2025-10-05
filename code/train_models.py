@@ -341,7 +341,7 @@ class DiversityNESRunner:
         data_loader: DataLoader,
         folder_name: str,
         model_id: int,
-        mode: str = "class",
+        mode: str = "logits",
     ) -> None:
         """Оценивает модель и сохраняет предсказания."""
         device = next(model.parameters()).device
@@ -612,9 +612,8 @@ class DiversityNESRunner:
                 print(f"❌ Failed to load {json_file}: {e}")
 
         print(f"✅ Loaded {len(self.models)} models.")
-
     def run_pretrained(self, index: int) -> None:
-        """Загружает и оценивает предобученные модели по индексу."""
+        """Загружает и параллельно оценивает предобученные модели по индексу."""
         root_dir = Path(self.config.best_models_save_path)
         json_dir = root_dir / f"models_json_{index}"
         pth_dir = root_dir / f"models_pth_{index}"
@@ -629,12 +628,169 @@ class DiversityNESRunner:
         if not arch_dicts:
             raise RuntimeError("No architectures found")
 
-        _, valid_loader, test_loader = self.get_data_loaders()
+        # Подготовка директорий для сохранения результатов
+        eval_output_dir = Path(self.config.output_path) / f"trained_models_archs_{index}"
+        eval_output_dir.mkdir(parents=True, exist_ok=True)
 
-        for entry in tqdm(arch_dicts, desc=f"Evaluating models index {index}"):
-            arch, model_id = entry["architecture"], entry.get("id")
+        # Получаем список моделей: (arch, model_id, pth_path)
+        model_tasks = []
+        for entry in arch_dicts:
+            arch = entry["architecture"]
+            model_id = entry.get("id")
             if model_id is None:
                 raise ValueError("Missing 'id' in architecture")
+            pth_file = pth_dir / f"model_{model_id}.pth"
+            if not pth_file.exists():
+                print(f"⚠️ Skipping model {model_id}: weights not found at {pth_file}")
+                continue
+            model_tasks.append((arch, model_id, pth_file))
+
+        if not model_tasks:
+            print("⚠️ No valid models to evaluate.")
+            return
+
+        n_models = len(model_tasks)
+        available_gpus = self._get_available_gpus()
+        n_gpus = len(available_gpus)
+        max_per_gpu = self.config.max_per_gpu
+
+        print(f"Available GPUs: {available_gpus}")
+        print(f"Evaluating {n_models} models, up to {max_per_gpu} per GPU")
+
+        # Запуск параллельных процессов
+        processes = []
+        active_processes = []  # будем хранить (process, model_id) для отслеживания
+
+        for idx, (arch, model_id, pth_path) in enumerate(model_tasks):
+            gpu_idx = (idx // max_per_gpu) % n_gpus
+            physical_gpu_id = available_gpus[gpu_idx]
+
+            p = mp.get_context("spawn").Process(
+                target=self._evaluate_single_model_process,
+                args=(
+                    arch,
+                    model_id,
+                    pth_path,
+                    str(eval_output_dir),
+                    physical_gpu_id,
+                    self.config,
+                    self.dataset_key,
+                    self.num_classes,
+                ),
+            )
+            p.start()
+            active_processes.append((p, model_id))
+            print(f"Started evaluation of model {model_id} on GPU {physical_gpu_id}")
+
+            # Ограничение активных процессов
+            while len(active_processes) >= n_gpus * max_per_gpu:
+                # Проверяем завершённые процессы
+                for proc, mid in active_processes[:]:
+                    if not proc.is_alive():
+                        proc.join()
+                        active_processes.remove((proc, mid))
+                        break
+                time.sleep(0.5)
+
+        # Дожидаемся всех оставшихся + прогресс-бар
+        completed = 0
+        with tqdm(total=n_models, desc="Evaluating models") as pbar:
+            while active_processes:
+                # Проверяем все процессы на завершение
+                for proc, mid in active_processes[:]:
+                    if not proc.is_alive():
+                        proc.join()
+                        active_processes.remove((proc, mid))
+                        completed += 1
+                        pbar.update(1)
+                time.sleep(0.5)  # небольшая пауза, чтобы не грузить CPU
+
+        print(f"✅ All models from index {index} evaluated!")
+
+        # Если нужно — оценить ансамбль
+        if self.config.evaluate_ensemble_flag:
+            print("📊 Evaluating ensemble for pretrained models...")
+            self.models = []
+            self._load_models_from_index(index)
+            if self.models:
+                _, _, test_loader = self.get_data_loaders()
+                stats = self.collect_ensemble_stats(test_loader)
+                self.finalize_ensemble_evaluation(stats, f"ensemble_results_{index}")
+            else:
+                print("❌ No models loaded for ensemble evaluation.")
+
+    @staticmethod
+    def _evaluate_single_model_process(
+        architecture: dict,
+        model_id: int,
+        pth_path: Path,
+        eval_output_dir: str,
+        physical_gpu_id: int,
+        config: TrainConfig,
+        dataset_key: str,
+        num_classes: int,
+    ):
+        """Процесс оценки одной предобученной модели."""
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(physical_gpu_id)
+
+        try:
+            if torch.cuda.is_available():
+                torch.cuda.set_device(0)
+                torch.cuda.empty_cache()
+            torch.set_float32_matmul_precision("high")
+
+            device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+            # Воссоздаём runner для получения трансформаций и загрузчиков
+            info = DatasetsInfo.get(config.dataset_name.lower())
+            runner = DiversityNESRunner(config, info)
+            _, valid_loader, _ = runner.get_data_loaders()
+
+            # Загружаем модель
+            with model_context(architecture):
+                model = DartsSpace(
+                    width=config.width,
+                    num_cells=config.num_cells,
+                    dataset=dataset_key,
+                )
+            state_dict = torch.load(pth_path, map_location="cpu", weights_only=True)
+            model.load_state_dict(state_dict)
+            model = model.to(device)
+
+            # Оцениваем
+            runner.evaluate_and_save_results(
+                model,
+                architecture,
+                valid_loader,
+                folder_name=eval_output_dir,
+                model_id=model_id,
+                mode="logits",
+            )
+
+        except Exception as e:
+            print(f"❌ Error evaluating model {model_id} on GPU {physical_gpu_id}: {e}")
+            raise
+        finally:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+    def _load_models_from_index(self, index: int) -> None:
+        """Загружает все модели из указанного индекса для ансамбля."""
+        root_dir = Path(self.config.best_models_save_path)
+        json_dir = root_dir / f"models_json_{index}"
+        pth_dir = root_dir / f"models_pth_{index}"
+
+        arch_dicts = load_json_from_directory(json_dir)
+        self.models = []
+
+        for entry in arch_dicts:
+            arch = entry["architecture"]
+            model_id = entry.get("id")
+            if model_id is None:
+                continue
+            pth_file = pth_dir / f"model_{model_id}.pth"
+            if not pth_file.exists():
+                continue
 
             with model_context(arch):
                 model = DartsSpace(
@@ -642,29 +798,10 @@ class DiversityNESRunner:
                     num_cells=self.config.num_cells,
                     dataset=self.dataset_key,
                 )
-            model.to(self.device)
-            pth_file = pth_dir / f"model_{model_id}.pth"
-            model.load_state_dict(
-                torch.load(pth_file, map_location=self.device, weights_only=True)
-            )
+            state_dict = torch.load(pth_file, map_location="cpu", weights_only=True)
+            model.load_state_dict(state_dict)
+            model = model.to(self.device)
             self.models.append(model)
-
-            if not self.config.evaluate_ensemble_flag:
-                self.evaluate_and_save_results(
-                    model,
-                    arch,
-                    valid_loader,
-                    folder_name=str(
-                        Path(self.config.output_path) / f"trained_models_archs_{index}"
-                    ),
-                    model_id=model_id,
-                )
-
-        if self.config.evaluate_ensemble_flag:
-            stats = self.collect_ensemble_stats(test_loader)
-            self.finalize_ensemble_evaluation(stats, f"ensemble_results_{index}")
-
-        print(f"✅ Pretrained models from index {index} evaluated.")
 
     def run_all_pretrained(self) -> None:
         """Оценивает все сохранённые ансамбли."""
