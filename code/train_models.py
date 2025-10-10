@@ -170,7 +170,7 @@ class DatasetsInfo:
                     transforms.ToTensor(),
                     transforms.Lambda(duplicate_channel),
                     transforms.Normalize(mean=[0.2860406] * 3, std=[0.35302424] * 3),
-                    Cutout(16),
+                    Cutout(12),
                 ]
             ),
             "test_transform": transforms.Compose(
@@ -248,7 +248,7 @@ class DiversityNESRunner:
             train_subset, batch_size=bs, num_workers=0, shuffle=True
         )
 
-        split_valid = int(num_samples * max(0.9, self.config.train_size_final))
+        split_valid = int(num_samples * self.config.train_size_final)
         valid_subset = Subset(train_data, indices[split_valid:])
         valid_loader = DataLoader(
             valid_subset, batch_size=bs, num_workers=0, shuffle=False
@@ -290,10 +290,6 @@ class DiversityNESRunner:
             model = model.to(self.device)
             model.apply(self._custom_weight_init)
 
-            tmp_valid_loader = (
-                valid_loader if self.config.evaluate_ensemble_flag else None
-            )
-
             evaluator = Lightning(
                 DartsClassificationModule(
                     learning_rate=self.config.lr_start_final,
@@ -316,7 +312,7 @@ class DiversityNESRunner:
                     benchmark=True,
                 ),
                 train_dataloaders=train_loader,
-                val_dataloaders=tmp_valid_loader,
+                val_dataloaders=valid_loader,
             )
             evaluator.fit(model)
             model = model.to(self.device)
@@ -341,7 +337,7 @@ class DiversityNESRunner:
         data_loader: DataLoader,
         folder_name: str,
         model_id: int,
-        mode: str = "logits",
+        mode: str = "classes",
     ) -> None:
         """Оценивает модель и сохраняет предсказания."""
         device = next(model.parameters()).device
@@ -547,13 +543,19 @@ class DiversityNESRunner:
             )
             train_loader, valid_loader, test_loader = runner.get_data_loaders()
 
-            model = runner.train_model(
-                architecture, train_loader, valid_loader, model_id
-            )
+
+            if config.evaluate_ensemble_flag:
+                model = runner.train_model(
+                    architecture, train_loader, None, model_id
+                )
+            else:
+                model = runner.train_model(
+                    architecture, train_loader, None, model_id
+                )
             if model is not None:
                 model = model.to(device)
 
-            eval_loader = valid_loader
+            eval_loader = test_loader if config.evaluate_ensemble_flag else valid_loader
             eval_folder = Path(config.output_path) / "trained_models_archs"
             runner.evaluate_and_save_results(
                 model, architecture, eval_loader, str(eval_folder), model_id=model_id
@@ -764,7 +766,7 @@ class DiversityNESRunner:
                 valid_loader,
                 folder_name=eval_output_dir,
                 model_id=model_id,
-                mode="logits",
+                mode="class",
             )
 
         except Exception as e:
@@ -831,6 +833,7 @@ class DiversityNESRunner:
         models_json_dir = (
             Path(self.config.best_models_save_path) / f"models_json_{latest_index}"
         )
+        print(f"Loading architectures from {models_json_dir}")
         arch_dicts = load_json_from_directory(models_json_dir)
 
         archs = [d["architecture"] for d in arch_dicts]

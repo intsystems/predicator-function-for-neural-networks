@@ -191,21 +191,21 @@ class SurrogateTrainer:
         )
         cfg.valid_loader_diversity = DataLoader(
             cfg.valid_dataset,
-            batch_size=cfg.batch_size,
+            batch_size=1024,
             shuffle=False,
             num_workers=self.config.num_workers,
             collate_fn=collate_triplets,
         )
         cfg.train_loader_accuracy = DataLoader(
             cfg.base_train_dataset,
-            batch_size=cfg.batch_size,
+            batch_size=min(16, cfg.batch_size),
             shuffle=True,
             num_workers=self.config.num_workers,
             collate_fn=collate_graphs,
         )
         cfg.valid_loader_accuracy = DataLoader(
             cfg.base_valid_dataset,
-            batch_size=cfg.batch_size,
+            batch_size=1024,
             shuffle=False,
             num_workers=self.config.num_workers,
             collate_fn=collate_graphs,

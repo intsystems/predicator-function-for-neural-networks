@@ -191,14 +191,14 @@ def collect_and_match(
 
 collect_and_match(
     [
-        # (
-        #     "/home/udeneev-av/RAS/predicator-function-for-neural-networks/code/output/trained_models_archs",
-        #     "/home/udeneev-av/RAS/predicator-function-for-neural-networks/code/output/trained_models_pth",
-        # ),
         (
-            "/home/udeneev-av/RAS/predicator-function-for-neural-networks/code/datasets/fashionmnist_archs",
-            "/home/udeneev-av/RAS/predicator-function-for-neural-networks/code/datasets/fashionmnist_pth",
+            "/home/udeneev-av/RAS/predicator-function-for-neural-networks/code/output/trained_models_archs_1",
+            "/home/udeneev-av/RAS/predicator-function-for-neural-networks/code/best_models/models_pth_1",
+        ),
+        (
+            "/home/udeneev-av/RAS/predicator-function-for-neural-networks/code/datasets/fashionmnist_acc_archs/architectures",
+            "/home/udeneev-av/RAS/predicator-function-for-neural-networks/code/datasets/fashionmnist_acc_archs/weights",
         ),
     ],
-    "/home/udeneev-av/RAS/predicator-function-for-neural-networks/code/datasets/fashionmnist_acc_archs",
+    "/home/udeneev-av/RAS/predicator-function-for-neural-networks/code/datasets/fashionmnist_united",
 )

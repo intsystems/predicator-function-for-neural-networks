@@ -155,7 +155,7 @@ def load_dataset(config) -> None:
 
 
 def load_dataset_on_inference(config) -> None:
-    config.dataset_path = Path(config.prepared_dataset_path)
+    config.dataset_path = Path(config.best_models_save_path)
 
     config.models_dict_path = []
     for file_path in config.dataset_path.rglob("*.json"):
