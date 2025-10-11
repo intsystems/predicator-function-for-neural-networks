@@ -373,7 +373,7 @@ class DiversityNESRunner:
     ) -> Tuple[Optional[float], Optional[List[float]], Optional[float]]:
         """Финализирует оценку ансамбля: вычисляет метрики и сохраняет результаты."""
         if stats is None:
-            logger.warning("No stats provided for evaluation.")
+            print("No stats provided for evaluation.")
             return None, None, None
 
         total = stats["total"]
@@ -834,7 +834,7 @@ class DiversityNESRunner:
                         n_ece_bins=self.config.n_ece_bins,
                         developer_mode=self.config.developer_mode,
                     )
-                self.finalize_ensemble_evaluation(stats, "ensemble_results")
+                self.finalize_ensemble_evaluation(stats, f"ensemble_results_{latest_index}")
             else:
                 print("❌ No models to evaluate.")
         else:
