@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export CUDA_VISIBLE_DEVICES="0,1,2,3,4,7"
+export CUDA_VISIBLE_DEVICES="0,1"
 
 CONFIG="surrogate_hp_dev.json"
 

@@ -28,10 +28,9 @@ from utils_nni.DartsSpace import DARTS_with_CIFAR100 as DartsSpace
 from dependencies.darts_classification_module import DartsClassificationModule
 from dependencies.train_config import TrainConfig
 from dependencies.data_generator import generate_arch_dicts
-
+from dependencies.metrics import collect_ensemble_stats, calculate_nll, calculate_ece, calculate_oracle_nll
 
 # === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
-
 
 def load_json_from_directory(directory_path: Path) -> List[dict]:
     """
@@ -218,8 +217,7 @@ class DiversityNESRunner:
         )
 
     def get_data_loaders(
-        self, batch_size: Optional[int] = None, seed: Optional[int] = None
-    ) -> Tuple[DataLoader, Optional[DataLoader], DataLoader]:
+        self, batch_size: Optional[int] = None, seed: Optional[int] = None):
         """Создаёт загрузчики данных."""
         bs = batch_size or self.config.batch_size_final
         dataset_cls = self.dataset_cls
@@ -375,109 +373,40 @@ class DiversityNESRunner:
             json.dump(result, f, indent=4)
         print(f"Results for model_{model_id} saved to {file_path}")
 
-    def collect_ensemble_stats(
-        self, test_loader: DataLoader
-    ) -> Optional[Dict[str, Any]]:
-        """Собирает статистику для ансамбля: точность, ECE."""
-        valid_models = [m for m in self.models if m is not None]
-        if not valid_models:
-            print("No valid models for ensemble evaluation.")
-            return None
-
-        main_device = self.device
-        for model in valid_models:
-            model.to(main_device).eval()
-
-        total = 0
-        correct_ensemble = 0
-        correct_models = [0] * len(valid_models)
-
-        n_bins = self.config.n_ece_bins
-        bin_boundaries = torch.linspace(0, 1, n_bins + 1)
-        bin_conf_sums = torch.zeros(n_bins)
-        bin_acc_sums = torch.zeros(n_bins)
-        bin_counts = torch.zeros(n_bins)
-
-        with torch.inference_mode():
-            for images, labels in tqdm(test_loader, desc="Evaluating ensemble"):
-                images, labels = images.to(main_device), labels.to(main_device)
-                batch_size = labels.size(0)
-                total += batch_size
-
-                avg_output = None
-                for idx, model in enumerate(valid_models):
-                    output = model(images).softmax(dim=1)
-                    _, preds = output.max(1)
-                    correct_models[idx] += (preds == labels).sum().item()
-
-                    if avg_output is None:
-                        avg_output = torch.zeros_like(output)
-                    avg_output += output
-
-                avg_output /= len(valid_models)
-                confidences, preds_ens = avg_output.max(1)
-                correct_ens_batch = (preds_ens == labels).float()
-
-                correct_ensemble += correct_ens_batch.sum().item()
-
-                confidences = confidences.cpu().float()
-                correct_ens_batch = correct_ens_batch.cpu()
-
-                for conf, correct in zip(confidences, correct_ens_batch):
-                    bin_idx = torch.bucketize(conf, bin_boundaries, right=True) - 1
-                    bin_idx = bin_idx.clamp(min=0, max=n_bins - 1)
-                    bin_counts[bin_idx] += 1
-                    bin_conf_sums[bin_idx] += conf
-                    bin_acc_sums[bin_idx] += correct
-
-                if self.config.developer_mode:
-                    break
-
-        return {
-            "total": total,
-            "correct_ensemble": correct_ensemble,
-            "correct_models": correct_models,
-            "bin_counts": bin_counts,
-            "bin_conf_sums": bin_conf_sums,
-            "bin_acc_sums": bin_acc_sums,
-            "n_bins": n_bins,
-            "num_models": len(valid_models),
-        }
-
     def finalize_ensemble_evaluation(
-        self, stats: Optional[Dict[str, Any]], file_name: str = "ensemble_results"
+        self,
+        stats: Optional[Dict[str, Any]],
+        file_name: str = "ensemble_results"
     ) -> Tuple[Optional[float], Optional[List[float]], Optional[float]]:
         """Финализирует оценку ансамбля: вычисляет метрики и сохраняет результаты."""
         if stats is None:
+            logger.warning("No stats provided for evaluation.")
             return None, None, None
 
         total = stats["total"]
         correct_ensemble = stats["correct_ensemble"]
         correct_models = stats["correct_models"]
-        bin_counts = stats["bin_counts"]
-        bin_conf_sums = stats["bin_conf_sums"]
-        bin_acc_sums = stats["bin_acc_sums"]
-        n_bins = stats["n_bins"]
         num_models = stats["num_models"]
 
         ensemble_acc = 100.0 * correct_ensemble / total
         model_accs = [100.0 * c / total for c in correct_models]
 
-        ece = 0.0
-        for i in range(n_bins):
-            if bin_counts[i] > 0:
-                bin_conf_avg = bin_conf_sums[i] / bin_counts[i]
-                bin_acc_avg = bin_acc_sums[i] / bin_counts[i]
-                bin_weight = bin_counts[i] / total
-                ece += bin_weight * abs(bin_conf_avg - bin_acc_avg)
+        ece = calculate_ece(stats)
+        nll = calculate_nll(stats)
+        oracle_nll = calculate_oracle_nll(stats)
+        normalized_predictive_disagreement = stats.get("normalized_predictive_disagreement", None)
 
-        print(f"\nEnsemble Evaluation Results:")
+        print("\nEnsemble Evaluation Results:")
         print(f"Ensemble Top-1 Accuracy: {ensemble_acc:.2f}%")
         print(f"Ensemble ECE: {ece:.4f}")
+        print(f"Ensemble NLL: {nll:.4f}")
+        print(f"Oracle Ensemble NLL: {oracle_nll:.4f}")
+        print(f"Normalized Predictive Disagreement: {normalized_predictive_disagreement:.4f}")
+        print(f"Number of models: {num_models}")
         for i, acc in enumerate(model_accs):
             print(f"Model {i+1} Top-1 Accuracy: {acc:.2f}%")
 
-        # Сохранение
+        # Сохранение в текстовый файл (оставляем)
         output_path = Path(self.config.output_path)
         output_path.mkdir(exist_ok=True)
         experiment_num = self._get_free_file_index(str(output_path), file_name)
@@ -486,6 +415,9 @@ class DiversityNESRunner:
         with open(out_file, "w") as f:
             f.write(f"Ensemble Top-1 Accuracy: {ensemble_acc:.2f}%\n")
             f.write(f"Ensemble ECE: {ece:.4f}\n")
+            f.write(f"Ensemble NLL: {nll:.4f}\n")
+            f.write(f"Oracle Ensemble NLL: {oracle_nll:.4f}\n")
+            f.write(f"Normalized Predictive Disagreement: {normalized_predictive_disagreement:.4f}\n")
             f.write(f"Number of models: {num_models}\n")
             for i, acc in enumerate(model_accs):
                 f.write(f"Model {i+1} Accuracy: {acc:.2f}%\n")
@@ -716,7 +648,13 @@ class DiversityNESRunner:
             self._load_models_from_index(index)
             if self.models:
                 _, _, test_loader = self.get_data_loaders()
-                stats = self.collect_ensemble_stats(test_loader)
+                stats = collect_ensemble_stats(
+                        models=self.models,
+                        device=self.device,
+                        test_loader=test_loader,
+                        n_ece_bins=self.config.n_ece_bins,
+                        developer_mode=self.config.developer_mode,
+                    )
                 self.finalize_ensemble_evaluation(stats, f"ensemble_results_{index}")
             else:
                 print("❌ No models loaded for ensemble evaluation.")
@@ -891,7 +829,13 @@ class DiversityNESRunner:
             self.fill_models_list()
             if self.models:
                 _, _, test_loader = self.get_data_loaders()
-                stats = self.collect_ensemble_stats(test_loader)
+                stats = collect_ensemble_stats(
+                        models=self.models,
+                        device=self.device,
+                        test_loader=test_loader,
+                        n_ece_bins=self.config.n_ece_bins,
+                        developer_mode=self.config.developer_mode,
+                    )
                 self.finalize_ensemble_evaluation(stats, "ensemble_results")
             else:
                 print("❌ No models to evaluate.")
