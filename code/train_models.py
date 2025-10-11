@@ -314,14 +314,7 @@ class DiversityNESRunner:
             )
             evaluator.fit(model)
             model = model.to(self.device)
-
-            # Сохранение модели
-            save_path = Path(self.config.output_path) / "trained_models_pth"
-            save_path.mkdir(parents=True, exist_ok=True)
-            model_path = save_path / f"model_{model_id}.pth"
-            torch.save(model.state_dict(), model_path)
-            print(f"Model {model_id} saved to {model_path}")
-
+            
             return model
 
         except Exception as e:
@@ -459,6 +452,8 @@ class DiversityNESRunner:
         config: TrainConfig,
         dataset_key: str,
         num_classes: int,
+        archs_path,
+        pth_path
     ):
         """Целевой процесс для параллельного обучения."""
         os.environ["CUDA_VISIBLE_DEVICES"] = str(physical_gpu_id)
@@ -487,10 +482,12 @@ class DiversityNESRunner:
             if model is not None:
                 model = model.to(device)
 
+            torch.save(model.state_dict(), pth_path/f"model_{model_id}.pth")
+            print(f"Model {model_id} saved to {pth_path}")
+
             eval_loader = test_loader if config.evaluate_ensemble_flag else valid_loader
-            eval_folder = Path(config.output_path) / "trained_models_archs"
             runner.evaluate_and_save_results(
-                model, architecture, eval_loader, str(eval_folder), model_id=model_id
+                model, architecture, eval_loader, str(archs_path), model_id=model_id
             )
 
         except Exception as e:
@@ -500,11 +497,8 @@ class DiversityNESRunner:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
-    def fill_models_list(self) -> None:
+    def fill_models_list(self, archs_path, pth_path) -> None:
         """Загружает обученные модели из .pth и .json."""
-        archs_path = Path(self.config.output_path) / "trained_models_archs"
-        pth_path = Path(self.config.output_path) / "trained_models_pth"
-
         if not archs_path.exists() or not pth_path.exists():
             raise FileNotFoundError(f"Missing directories: {archs_path}, {pth_path}")
 
@@ -787,8 +781,10 @@ class DiversityNESRunner:
 
         # Создание директорий
         output_path = Path(self.config.output_path)
-        (output_path / "trained_models_pth").mkdir(parents=True, exist_ok=True)
-        (output_path / "trained_models_archs").mkdir(parents=True, exist_ok=True)
+        archs_path = output_path / f"trained_models_archs_{latest_index}"
+        pth_path = output_path / f"trained_models_pth_{latest_index}"
+        archs_path.mkdir(parents=True, exist_ok=True)
+        pth_path.mkdir(parents=True, exist_ok=True)
 
         # Параллельное обучение
         processes = []
@@ -805,6 +801,8 @@ class DiversityNESRunner:
                     self.config,
                     self.dataset_key,
                     self.num_classes,
+                    archs_path,
+                    pth_path
                 ),
             )
             p.start()
@@ -826,7 +824,7 @@ class DiversityNESRunner:
         # Оценка ансамбля
         if self.config.evaluate_ensemble_flag:
             print("📊 Evaluating ensemble...")
-            self.fill_models_list()
+            self.fill_models_list(archs_path, pth_path)
             if self.models:
                 _, _, test_loader = self.get_data_loaders()
                 stats = collect_ensemble_stats(
