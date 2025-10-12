@@ -12,6 +12,8 @@ def collect_ensemble_stats(
     test_loader: DataLoader,
     n_ece_bins: int,
     developer_mode: bool = False,
+    mean=0,
+    std=1,
 ) -> Optional[Dict[str, Any]]:
     """
     Собирает статистику для ансамбля: точность, ECE, сумма NLL, Oracle NLL, Predictive Disagreement.
@@ -31,7 +33,7 @@ def collect_ensemble_stats(
     sum_oracle_nll = 0.0
 
     sum_predictive_disagreement = 0.0  # Сумма несогласия по всему датасету
-    num_pred_dis_samples = 0           # Количество обработанных примеров
+    num_pred_dis_samples = 0  # Количество обработанных примеров
 
     n_bins = n_ece_bins
     bin_boundaries = torch.linspace(0, 1, n_bins + 1)
@@ -79,14 +81,20 @@ def collect_ensemble_stats(
             sum_nll += nll_batch.sum().item()
 
             # Oracle loss: минимум NLL по всем моделям на каждом объекте батча
-            all_model_probs = torch.cat(all_model_probs, dim=1)  # (batch_size, num_models)
-            oracle_nll_batch = -torch.log(all_model_probs + eps)  # (batch_size, num_models)
+            all_model_probs = torch.cat(
+                all_model_probs, dim=1
+            )  # (batch_size, num_models)
+            oracle_nll_batch = -torch.log(
+                all_model_probs + eps
+            )  # (batch_size, num_models)
             min_oracle_nll_per_sample, _ = oracle_nll_batch.min(dim=1)  # (batch_size, )
             sum_oracle_nll += min_oracle_nll_per_sample.sum().item()
 
             # Predictive disagreement (L1-норма) --------------------
             # Формируем (batch_size, num_models, num_classes)
-            all_outputs_tensor = torch.cat(all_outputs, dim=1)  # (batch_size, num_models, num_classes)
+            all_outputs_tensor = torch.cat(
+                all_outputs, dim=1
+            )  # (batch_size, num_models, num_classes)
             num_models = len(valid_models)
 
             # Для каждой пары (i, j) считаем l1 расстояние между предсказаниями на каждом объекте
@@ -94,11 +102,17 @@ def collect_ensemble_stats(
             model_indices = list(range(num_models))
             for i, j in itertools.combinations(model_indices, 2):
                 # L1 по последней оси (num_classes)
-                l1 = (all_outputs_tensor[:, i, :] - all_outputs_tensor[:, j, :]).abs().sum(dim=1)
+                l1 = (
+                    (all_outputs_tensor[:, i, :] - all_outputs_tensor[:, j, :])
+                    .abs()
+                    .sum(dim=1)
+                )
                 disagreements.append(l1)
             # (num_pairs, batch_size) -> (batch_size, )
             if disagreements:
-                disagreements_tensor = torch.stack(disagreements, dim=1)  # (batch_size, num_pairs)
+                disagreements_tensor = torch.stack(
+                    disagreements, dim=1
+                )  # (batch_size, num_pairs)
                 batch_pred_dis = disagreements_tensor.mean(dim=1)  # (batch_size,)
                 sum_predictive_disagreement += batch_pred_dis.sum().item()
                 num_pred_dis_samples += batch_size
@@ -117,14 +131,31 @@ def collect_ensemble_stats(
                 break
 
     # Среднее несогласие на примере:
-    predictive_disagreement = sum_predictive_disagreement / num_pred_dis_samples if num_pred_dis_samples > 0 else float('nan')
+    predictive_disagreement = (
+        sum_predictive_disagreement / num_pred_dis_samples
+        if num_pred_dis_samples > 0
+        else float("nan")
+    )
     # Средняя ошибка моделей
-    avg_model_err = 1.0 - sum(correct_models) / (len(correct_models) * total) if total > 0 else float("nan")
+    avg_model_err = (
+        1.0 - sum(correct_models) / (len(correct_models) * total)
+        if total > 0
+        else float("nan")
+    )
     # Нормализованное несогласие
-    normalized_predictive_disagreement = predictive_disagreement / avg_model_err if avg_model_err > 0 else float("nan")
-    
+    normalized_predictive_disagreement = (
+        predictive_disagreement / avg_model_err if avg_model_err > 0 else float("nan")
+    )
+
     fgsm_attack_epsilons = [0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3]
-    adversarial_attack_info = adversarial_attack(valid_models, test_loader, fgsm_attack_epsilons, device=device)
+    adversarial_attack_info = adversarial_attack(
+        valid_models,
+        test_loader,
+        fgsm_attack_epsilons,
+        device=device,
+        mean=mean,
+        std=std,
+    )
 
     return {
         "total": total,
@@ -140,7 +171,7 @@ def collect_ensemble_stats(
         "predictive_disagreement": predictive_disagreement,
         "normalized_predictive_disagreement": normalized_predictive_disagreement,
         "avg_model_err": avg_model_err,
-        "adversarial_attack_info":adversarial_attack_info
+        "adversarial_attack_info": adversarial_attack_info,
     }
 
 
@@ -182,15 +213,51 @@ def calculate_oracle_nll(stats):
     return sum_oracle_nll / total if total > 0 else float("nan")
 
 
+def denormalize(tensor, mean, std):
+    """
+    Денормализует тензор: x_original = x_norm * std + mean
+    Предполагается, что тензор имеет форму (B, C, H, W)
+    """
+    mean = torch.tensor(mean, device=tensor.device).view(1, -1, 1, 1)
+    std = torch.tensor(std, device=tensor.device).view(1, -1, 1, 1)
+    return tensor * std + mean
+
+
+def normalize(tensor, mean, std):
+    """
+    Нормализует тензор: x_norm = (x - mean) / std
+    """
+    mean = torch.tensor(mean, device=tensor.device).view(1, -1, 1, 1)
+    std = torch.tensor(std, device=tensor.device).view(1, -1, 1, 1)
+    return (tensor - mean) / std
+
+
 def fgsm_attack(image, epsilon, data_grad):
     sign_data_grad = data_grad.sign()
     perturbed_image = image + epsilon * sign_data_grad
     perturbed_image = torch.clamp(perturbed_image, 0, 1)
     return perturbed_image
 
-def adversarial_attack(models, test_loader, epsilon_list=[0.01, 0.02, 0.05], device=None):
+
+def adversarial_attack(
+    models,
+    test_loader,
+    epsilon_list=[0.01, 0.02, 0.05],
+    device=None,
+    mean=None,
+    std=None,
+):
     if device is None:
         device = next(models[0].parameters()).device
+
+    if mean is None or std is None:
+        raise ValueError(
+            "Параметры mean и std обязательны для корректной атаки на нормализованных данных!"
+        )
+
+    # Преобразуем mean/std в тензоры на устройстве (для denormalize/normalize)
+    mean_tensor = torch.tensor(mean, device=device).view(1, -1, 1, 1)
+    std_tensor = torch.tensor(std, device=device).view(1, -1, 1, 1)
 
     results = {}
 
@@ -203,14 +270,22 @@ def adversarial_attack(models, test_loader, epsilon_list=[0.01, 0.02, 0.05], dev
             images = images.to(device)
             labels = labels.to(device)
 
-            # Создаём копию с градиентами
-            images_adv = images.clone().detach().requires_grad_(True)
+            # === Денормализуем → получаем изображения в [0, 1] ===
+            images_denorm = images * std_tensor + mean_tensor
+            images_denorm = torch.clamp(
+                images_denorm, 0, 1
+            )  # на случай численных ошибок
 
-            # === Вычисляем градиент от ансамбля (средние логиты) ===
+            # Создаём копию с градиентами в [0,1] пространстве
+            images_adv = images_denorm.clone().detach().requires_grad_(True)
+
+            # === Прямой проход: нормализуем перед подачей в модель! ===
             logits_sum = None
             for model in models:
                 model.eval()
-                logits = model(images_adv)  # логиты!
+                # Нормализуем images_adv → как ожидалось моделью
+                images_norm = (images_adv - mean_tensor) / std_tensor
+                logits = model(images_norm)
                 if logits_sum is None:
                     logits_sum = torch.zeros_like(logits)
                 logits_sum += logits
@@ -220,8 +295,11 @@ def adversarial_attack(models, test_loader, epsilon_list=[0.01, 0.02, 0.05], dev
             loss.backward()
             data_grad = images_adv.grad.data
 
-            # Применяем FGSM
-            perturbed_data = fgsm_attack(images, epsilon, data_grad)
+            # === Применяем FGSM в [0,1] пространстве ===
+            perturbed_denorm = fgsm_attack(images_denorm, epsilon, data_grad)
+
+            # === Нормализуем для оценки ===
+            perturbed_norm = (perturbed_denorm - mean_tensor) / std_tensor
 
             # === Оценка на возмущённых данных ===
             with torch.inference_mode():
@@ -229,7 +307,7 @@ def adversarial_attack(models, test_loader, epsilon_list=[0.01, 0.02, 0.05], dev
                 avg_output = None
                 for idx, model in enumerate(models):
                     model.eval()
-                    output = model(perturbed_data).softmax(dim=1)
+                    output = model(perturbed_norm).softmax(dim=1)
                     _, pred = output.max(1)
                     correct_models[idx] += (pred == labels).sum().item()
                     if avg_output is None:
@@ -242,9 +320,6 @@ def adversarial_attack(models, test_loader, epsilon_list=[0.01, 0.02, 0.05], dev
 
         ensemble_acc = correct_ensemble / total * 100.0
         model_accs = [correct / total * 100.0 for correct in correct_models]
-        results[epsilon] = {
-            "ensemble_acc": ensemble_acc,
-            "model_accs": model_accs
-        }
+        results[epsilon] = {"ensemble_acc": ensemble_acc, "model_accs": model_accs}
 
     return results

@@ -676,6 +676,8 @@ class DiversityNESRunner:
                     test_loader=test_loader,
                     n_ece_bins=self.config.n_ece_bins,
                     developer_mode=self.config.developer_mode,
+                    mean=self.MEAN,
+                    std=self.STD
                 )
                 self.finalize_ensemble_evaluation(stats, f"ensemble_results_{index}")
             else:
@@ -861,6 +863,8 @@ class DiversityNESRunner:
                     test_loader=test_loader,
                     n_ece_bins=self.config.n_ece_bins,
                     developer_mode=self.config.developer_mode,
+                    mean=self.MEAN,
+                    std=self.STD
                 )
                 self.finalize_ensemble_evaluation(
                     stats, f"ensemble_results_{latest_index}"
