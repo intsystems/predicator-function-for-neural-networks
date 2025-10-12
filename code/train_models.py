@@ -28,9 +28,16 @@ from utils_nni.DartsSpace import DARTS_with_CIFAR100 as DartsSpace
 from dependencies.darts_classification_module import DartsClassificationModule
 from dependencies.train_config import TrainConfig
 from dependencies.data_generator import generate_arch_dicts
-from dependencies.metrics import collect_ensemble_stats, calculate_nll, calculate_ece, calculate_oracle_nll
+from dependencies.metrics import (
+    collect_ensemble_stats,
+    calculate_nll,
+    calculate_ece,
+    calculate_oracle_nll,
+    adversarial_attack
+)
 
 # === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
+
 
 def load_json_from_directory(directory_path: Path) -> List[dict]:
     """
@@ -217,7 +224,8 @@ class DiversityNESRunner:
         )
 
     def get_data_loaders(
-        self, batch_size: Optional[int] = None, seed: Optional[int] = None):
+        self, batch_size: Optional[int] = None, seed: Optional[int] = None
+    ):
         """Создаёт загрузчики данных."""
         bs = batch_size or self.config.batch_size_final
         dataset_cls = self.dataset_cls
@@ -314,7 +322,7 @@ class DiversityNESRunner:
             )
             evaluator.fit(model)
             model = model.to(self.device)
-            
+
             return model
 
         except Exception as e:
@@ -367,10 +375,8 @@ class DiversityNESRunner:
         print(f"Results for model_{model_id} saved to {file_path}")
 
     def finalize_ensemble_evaluation(
-        self,
-        stats: Optional[Dict[str, Any]],
-        file_name: str = "ensemble_results"
-    ) -> Tuple[Optional[float], Optional[List[float]], Optional[float]]:
+            self, stats: Optional[Dict[str, Any]], file_name: str = "ensemble_results"
+        ) -> Tuple[Optional[float], Optional[List[float]], Optional[float]]:
         """Финализирует оценку ансамбля: вычисляет метрики и сохраняет результаты."""
         if stats is None:
             print("No stats provided for evaluation.")
@@ -388,32 +394,56 @@ class DiversityNESRunner:
         nll = calculate_nll(stats)
         oracle_nll = calculate_oracle_nll(stats)
         normalized_predictive_disagreement = stats.get("normalized_predictive_disagreement", None)
+        adversarial_attack_info = stats.get("adversarial_attack_info", {})
 
-        print("\nEnsemble Evaluation Results:")
-        print(f"Ensemble Top-1 Accuracy: {ensemble_acc:.2f}%")
-        print(f"Ensemble ECE: {ece:.4f}")
-        print(f"Ensemble NLL: {nll:.4f}")
-        print(f"Oracle Ensemble NLL: {oracle_nll:.4f}")
-        print(f"Normalized Predictive Disagreement: {normalized_predictive_disagreement:.4f}")
-        print(f"Number of models: {num_models}")
+        # -------- Форматированный print ----------
+        print("="*36)
+        print("Ensemble Evaluation Results")
+        print("="*36)
+        print(f"Ensemble Top-1 Accuracy:             {ensemble_acc:.2f}%")
+        print(f"Ensemble ECE:                        {ece:.4f}")
+        print(f"Ensemble NLL:                        {nll:.4f}")
+        print(f"Oracle Ensemble NLL:                 {oracle_nll:.4f}")
+        print(f"Normalized Predictive Disagreement:   {normalized_predictive_disagreement:.4f}")
+        print(f"Number of models:                    {num_models}")
         for i, acc in enumerate(model_accs):
-            print(f"Model {i+1} Top-1 Accuracy: {acc:.2f}%")
+            print(f"Model {i+1} Top-1 Accuracy:          {acc:.2f}%")
+        print("\n--- Adversarial Attack Results (FGSM) ---")
+        if adversarial_attack_info:
+            for eps, eps_info in sorted(adversarial_attack_info.items()):
+                print(f"Epsilon = {eps:.4f}")
+                print(f"    Ensemble accuracy:               {eps_info['ensemble_acc']:.2f}%")
+                for i, acc in enumerate(eps_info["model_accs"]):
+                    print(f"    Model {i+1} accuracy:            {acc:.2f}%")
+                print("-"*36)
+        print(f"\nResults saved to file: {file_name}\n")
 
-        # Сохранение в текстовый файл (оставляем)
+        # --------- Запись в файл --------------
         output_path = Path(self.config.output_path)
         output_path.mkdir(exist_ok=True)
         experiment_num = self._get_free_file_index(str(output_path), file_name)
         out_file = output_path / f"{file_name}_{experiment_num}.txt"
 
         with open(out_file, "w") as f:
-            f.write(f"Ensemble Top-1 Accuracy: {ensemble_acc:.2f}%\n")
-            f.write(f"Ensemble ECE: {ece:.4f}\n")
-            f.write(f"Ensemble NLL: {nll:.4f}\n")
-            f.write(f"Oracle Ensemble NLL: {oracle_nll:.4f}\n")
-            f.write(f"Normalized Predictive Disagreement: {normalized_predictive_disagreement:.4f}\n")
-            f.write(f"Number of models: {num_models}\n")
+            f.write("="*36 + "\n")
+            f.write("Ensemble Evaluation Results\n")
+            f.write("="*36 + "\n")
+            f.write(f"Ensemble Top-1 Accuracy:             {ensemble_acc:.2f}%\n")
+            f.write(f"Ensemble ECE:                        {ece:.4f}\n")
+            f.write(f"Ensemble NLL:                        {nll:.4f}\n")
+            f.write(f"Oracle Ensemble NLL:                 {oracle_nll:.4f}\n")
+            f.write(f"Normalized Predictive Disagreement:   {normalized_predictive_disagreement:.4f}\n")
+            f.write(f"Number of models:                    {num_models}\n")
             for i, acc in enumerate(model_accs):
-                f.write(f"Model {i+1} Accuracy: {acc:.2f}%\n")
+                f.write(f"Model {i+1} Top-1 Accuracy:          {acc:.2f}%\n")
+            f.write("\n--- Adversarial Attack Results (FGSM) ---\n")
+            if adversarial_attack_info:
+                for eps, eps_info in sorted(adversarial_attack_info.items()):
+                    f.write(f"Epsilon = {eps:.4f}\n")
+                    f.write(f"    Ensemble accuracy:               {eps_info['ensemble_acc']:.2f}%\n")
+                    for i, acc in enumerate(eps_info["model_accs"]):
+                        f.write(f"    Model {i+1} accuracy:            {acc:.2f}%\n")
+                    f.write("-"*36 + "\n")
 
         print(f"Results saved to {out_file}")
         return ensemble_acc, model_accs, ece
@@ -453,7 +483,7 @@ class DiversityNESRunner:
         dataset_key: str,
         num_classes: int,
         archs_path,
-        pth_path
+        pth_path,
     ):
         """Целевой процесс для параллельного обучения."""
         os.environ["CUDA_VISIBLE_DEVICES"] = str(physical_gpu_id)
@@ -470,19 +500,14 @@ class DiversityNESRunner:
             )
             train_loader, valid_loader, test_loader = runner.get_data_loaders()
 
-
             if config.evaluate_ensemble_flag:
-                model = runner.train_model(
-                    architecture, train_loader, None, model_id
-                )
+                model = runner.train_model(architecture, train_loader, None, model_id)
             else:
-                model = runner.train_model(
-                    architecture, train_loader, None, model_id
-                )
+                model = runner.train_model(architecture, train_loader, None, model_id)
             if model is not None:
                 model = model.to(device)
 
-            torch.save(model.state_dict(), pth_path/f"model_{model_id}.pth")
+            torch.save(model.state_dict(), pth_path / f"model_{model_id}.pth")
             print(f"Model {model_id} saved to {pth_path}")
 
             eval_loader = test_loader if config.evaluate_ensemble_flag else valid_loader
@@ -540,6 +565,7 @@ class DiversityNESRunner:
                 print(f"❌ Failed to load {json_file}: {e}")
 
         print(f"✅ Loaded {len(self.models)} models.")
+
     def run_pretrained(self, index: int) -> None:
         """Загружает и параллельно оценивает предобученные модели по индексу."""
         root_dir = Path(self.config.best_models_save_path)
@@ -557,7 +583,9 @@ class DiversityNESRunner:
             raise RuntimeError("No architectures found")
 
         # Подготовка директорий для сохранения результатов
-        eval_output_dir = Path(self.config.output_path) / f"trained_models_archs_{index}"
+        eval_output_dir = (
+            Path(self.config.output_path) / f"trained_models_archs_{index}"
+        )
         eval_output_dir.mkdir(parents=True, exist_ok=True)
 
         # Получаем список моделей: (arch, model_id, pth_path)
@@ -643,12 +671,12 @@ class DiversityNESRunner:
             if self.models:
                 _, _, test_loader = self.get_data_loaders()
                 stats = collect_ensemble_stats(
-                        models=self.models,
-                        device=self.device,
-                        test_loader=test_loader,
-                        n_ece_bins=self.config.n_ece_bins,
-                        developer_mode=self.config.developer_mode,
-                    )
+                    models=self.models,
+                    device=self.device,
+                    test_loader=test_loader,
+                    n_ece_bins=self.config.n_ece_bins,
+                    developer_mode=self.config.developer_mode,
+                )
                 self.finalize_ensemble_evaluation(stats, f"ensemble_results_{index}")
             else:
                 print("❌ No models loaded for ensemble evaluation.")
@@ -802,7 +830,7 @@ class DiversityNESRunner:
                     self.dataset_key,
                     self.num_classes,
                     archs_path,
-                    pth_path
+                    pth_path,
                 ),
             )
             p.start()
@@ -828,13 +856,15 @@ class DiversityNESRunner:
             if self.models:
                 _, _, test_loader = self.get_data_loaders()
                 stats = collect_ensemble_stats(
-                        models=self.models,
-                        device=self.device,
-                        test_loader=test_loader,
-                        n_ece_bins=self.config.n_ece_bins,
-                        developer_mode=self.config.developer_mode,
-                    )
-                self.finalize_ensemble_evaluation(stats, f"ensemble_results_{latest_index}")
+                    models=self.models,
+                    device=self.device,
+                    test_loader=test_loader,
+                    n_ece_bins=self.config.n_ece_bins,
+                    developer_mode=self.config.developer_mode,
+                )
+                self.finalize_ensemble_evaluation(
+                    stats, f"ensemble_results_{latest_index}"
+                )
             else:
                 print("❌ No models to evaluate.")
         else:

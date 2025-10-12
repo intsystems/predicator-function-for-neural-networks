@@ -3,6 +3,7 @@ import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 import itertools
+from torch.nn import functional as F
 
 
 def collect_ensemble_stats(
@@ -121,6 +122,9 @@ def collect_ensemble_stats(
     avg_model_err = 1.0 - sum(correct_models) / (len(correct_models) * total) if total > 0 else float("nan")
     # Нормализованное несогласие
     normalized_predictive_disagreement = predictive_disagreement / avg_model_err if avg_model_err > 0 else float("nan")
+    
+    fgsm_attack_epsilons = [0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3]
+    adversarial_attack_info = adversarial_attack(valid_models, test_loader, fgsm_attack_epsilons, device=device)
 
     return {
         "total": total,
@@ -136,6 +140,7 @@ def collect_ensemble_stats(
         "predictive_disagreement": predictive_disagreement,
         "normalized_predictive_disagreement": normalized_predictive_disagreement,
         "avg_model_err": avg_model_err,
+        "adversarial_attack_info":adversarial_attack_info
     }
 
 
@@ -175,3 +180,71 @@ def calculate_oracle_nll(stats):
     total = stats["total"]
 
     return sum_oracle_nll / total if total > 0 else float("nan")
+
+
+def fgsm_attack(image, epsilon, data_grad):
+    sign_data_grad = data_grad.sign()
+    perturbed_image = image + epsilon * sign_data_grad
+    perturbed_image = torch.clamp(perturbed_image, 0, 1)
+    return perturbed_image
+
+def adversarial_attack(models, test_loader, epsilon_list=[0.01, 0.02, 0.05], device=None):
+    if device is None:
+        device = next(models[0].parameters()).device
+
+    results = {}
+
+    for epsilon in epsilon_list:
+        total = 0
+        correct_ensemble = 0
+        correct_models = [0 for _ in models]
+
+        for images, labels in tqdm(test_loader, desc=f"Attack (eps={epsilon})"):
+            images = images.to(device)
+            labels = labels.to(device)
+
+            # Создаём копию с градиентами
+            images_adv = images.clone().detach().requires_grad_(True)
+
+            # === Вычисляем градиент от ансамбля (средние логиты) ===
+            logits_sum = None
+            for model in models:
+                model.eval()
+                logits = model(images_adv)  # логиты!
+                if logits_sum is None:
+                    logits_sum = torch.zeros_like(logits)
+                logits_sum += logits
+
+            avg_logits = logits_sum / len(models)
+            loss = F.cross_entropy(avg_logits, labels)
+            loss.backward()
+            data_grad = images_adv.grad.data
+
+            # Применяем FGSM
+            perturbed_data = fgsm_attack(images, epsilon, data_grad)
+
+            # === Оценка на возмущённых данных ===
+            with torch.inference_mode():
+                total += labels.size(0)
+                avg_output = None
+                for idx, model in enumerate(models):
+                    model.eval()
+                    output = model(perturbed_data).softmax(dim=1)
+                    _, pred = output.max(1)
+                    correct_models[idx] += (pred == labels).sum().item()
+                    if avg_output is None:
+                        avg_output = torch.zeros_like(output)
+                    avg_output += output
+
+                avg_output /= len(models)
+                _, ens_pred = avg_output.max(1)
+                correct_ensemble += (ens_pred == labels).sum().item()
+
+        ensemble_acc = correct_ensemble / total * 100.0
+        model_accs = [correct / total * 100.0 for correct in correct_models]
+        results[epsilon] = {
+            "ensemble_acc": ensemble_acc,
+            "model_accs": model_accs
+        }
+
+    return results
