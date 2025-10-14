@@ -454,7 +454,14 @@ class DiversityNESRunner:
         while (Path(path) / f"{file_name}_{experiment_num}.txt").exists():
             experiment_num += 1
         return experiment_num
-
+    
+    def _get_free_file_index_dir(self, path: str, dir_name: str) -> int:
+        """Находит свободный индекс для имени папки."""
+        experiment_num = 1
+        while (Path(path) / f"{dir_name}_{experiment_num}").exists():
+            experiment_num += 1
+        return experiment_num
+    
     def get_latest_index_from_dir(self, base_path: Optional[Path] = None) -> int:
         """Находит последний индекс в директориях models_json_*."""
         if base_path is None:
@@ -569,8 +576,8 @@ class DiversityNESRunner:
     def run_pretrained(self, index: int) -> None:
         """Загружает и параллельно оценивает предобученные модели по индексу."""
         root_dir = Path(self.config.best_models_save_path)
-        json_dir = root_dir / f"models_json_{index}"
-        pth_dir = root_dir / f"models_pth_{index}"
+        json_dir = root_dir / f"trained_models_archs_{index}"
+        pth_dir = root_dir / f"trained_models_pth_{index}"
 
         if not json_dir.exists():
             raise FileNotFoundError(f"Directory not found: {json_dir}")
@@ -708,7 +715,13 @@ class DiversityNESRunner:
             # Воссоздаём runner для получения трансформаций и загрузчиков
             info = DatasetsInfo.get(config.dataset_name.lower())
             runner = DiversityNESRunner(config, info)
-            _, valid_loader, _ = runner.get_data_loaders()
+            _, valid_loader, test_loader = runner.get_data_loaders()
+
+            if config.evaluate_ensemble_flag:
+                eval_loader = test_loader
+            else:
+                eval_loader = valid_loader
+                
 
             # Загружаем модель
             with model_context(architecture):
@@ -725,7 +738,7 @@ class DiversityNESRunner:
             runner.evaluate_and_save_results(
                 model,
                 architecture,
-                valid_loader,
+                eval_loader,
                 folder_name=eval_output_dir,
                 model_id=model_id,
                 mode="class",
@@ -741,8 +754,9 @@ class DiversityNESRunner:
     def _load_models_from_index(self, index: int) -> None:
         """Загружает все модели из указанного индекса для ансамбля."""
         root_dir = Path(self.config.best_models_save_path)
-        json_dir = root_dir / f"models_json_{index}"
-        pth_dir = root_dir / f"models_pth_{index}"
+        json_dir = root_dir / f"trained_models_archs_{index}"
+        pth_dir = root_dir / f"trained_models_pth_{index}"
+
 
         arch_dicts = load_json_from_directory(json_dir)
         self.models = []
@@ -773,10 +787,12 @@ class DiversityNESRunner:
         if not root_dir.exists():
             raise FileNotFoundError(f"Directory not found: {root_dir}")
 
-        last_index = self.get_latest_index_from_dir(root_dir)
-        for idx in range(1, last_index + 1):
-            if (root_dir / f"models_json_{idx}").exists() and (
-                root_dir / f"models_pth_{idx}"
+        # last_index = self.get_latest_index_from_dir(root_dir)
+        last_index = self._get_free_file_index_dir(root_dir, "trained_models_archs")
+        print(f"Last index: {last_index}")
+        for idx in range(1, last_index):
+            if (root_dir / f"trained_models_archs_{idx}").exists() and (
+                root_dir / f"trained_models_pth_{idx}"
             ).exists():
                 self.run_pretrained(idx)
                 self.models = []  # очистка после каждого индекса

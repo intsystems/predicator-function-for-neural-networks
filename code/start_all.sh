@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export CUDA_VISIBLE_DEVICES="0,1"
+export CUDA_VISIBLE_DEVICES="0"
 
 CONFIG="surrogate_hp_dev.json"
 
@@ -14,13 +14,12 @@ echo
 
 start_time=$(date +%s)
 
-python inference_surrogate.py --hyperparameters_json "$CONFIG"
-
-python train_models.py --hyperparameters_json "$CONFIG"
-
-python inference_surrogate.py --hyperparameters_json "$CONFIG"
-
-python train_models.py --hyperparameters_json "$CONFIG"
+# Run inference and training in a loop
+for i in {1..10}; do
+    echo "🔄 Iteration $i"
+    python inference_surrogate.py --hyperparameters_json "$CONFIG"
+    python train_models.py --hyperparameters_json "$CONFIG"
+done
 
 end_time=$(date +%s)
 

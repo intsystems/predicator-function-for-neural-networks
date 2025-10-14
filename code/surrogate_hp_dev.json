@@ -1,12 +1,12 @@
 {
     "seed": -1,
-    "num_workers": 0,
+    "num_workers": 20,
     "dataset_path": "datasets/fashionmnist_united/architectures",
     "acc_dataset_path": "datasets/fashionmnist_united/architectures",
     "div_dataset_path": "datasets/fashionmnist_united/architectures",
 
-    "device": "cuda:1",
-    "developer_mode": true,
+    "device": "cuda:0",
+    "developer_mode": false,
 
     "n_models": 2785,
 
@@ -34,14 +34,14 @@
 
     "surrogate_inference_path": "surrogate_models/",
 
-    "use_pretrained_models_for_ensemble": false,
+    "use_pretrained_models_for_ensemble": true,
     "n_ensemble_models": 3,
     "n_models_in_pool": 4096,
-    "n_models_to_generate": 8,
+    "n_models_to_generate": 8192000,
     "batch_size_inference": 4096,
-    "min_accuracy_for_pool": 0.1,
+    "min_accuracy_for_pool": 0.9,
     "acc_distance_gamma": 1,
-    "min_acc_and_div_to_ensemble": 0.1,
+    "min_acc_and_div_to_ensemble": 0.9,
     "best_models_save_path": "best_models/",
     "tmp_archs_path": "datasets/tmp_archs/",
     "random_choice_out_of_best": false,

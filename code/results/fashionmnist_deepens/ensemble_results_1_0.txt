@@ -1,0 +1,56 @@
+====================================
+Ensemble Evaluation Results
+====================================
+Ensemble Top-1 Accuracy:             95.41%
+Ensemble ECE:                        0.1199
+Ensemble NLL:                        0.2559
+Oracle Ensemble NLL:                 0.2070
+Normalized Predictive Disagreement:   1.9522
+Number of models:                    3
+Model 1 Top-1 Accuracy:          95.05%
+Model 2 Top-1 Accuracy:          94.88%
+Model 3 Top-1 Accuracy:          95.27%
+
+--- Adversarial Attack Results (FGSM) ---
+Epsilon = 0.0000
+    Ensemble accuracy:               95.41%
+    Model 1 accuracy:            95.05%
+    Model 2 accuracy:            94.89%
+    Model 3 accuracy:            95.27%
+------------------------------------
+Epsilon = 0.0500
+    Ensemble accuracy:               42.41%
+    Model 1 accuracy:            33.52%
+    Model 2 accuracy:            47.32%
+    Model 3 accuracy:            38.89%
+------------------------------------
+Epsilon = 0.1000
+    Ensemble accuracy:               27.27%
+    Model 1 accuracy:            18.08%
+    Model 2 accuracy:            28.90%
+    Model 3 accuracy:            32.34%
+------------------------------------
+Epsilon = 0.1500
+    Ensemble accuracy:               23.67%
+    Model 1 accuracy:            15.41%
+    Model 2 accuracy:            24.26%
+    Model 3 accuracy:            28.14%
+------------------------------------
+Epsilon = 0.2000
+    Ensemble accuracy:               21.08%
+    Model 1 accuracy:            14.96%
+    Model 2 accuracy:            20.47%
+    Model 3 accuracy:            24.11%
+------------------------------------
+Epsilon = 0.2500
+    Ensemble accuracy:               18.17%
+    Model 1 accuracy:            14.40%
+    Model 2 accuracy:            16.87%
+    Model 3 accuracy:            21.27%
+------------------------------------
+Epsilon = 0.3000
+    Ensemble accuracy:               15.32%
+    Model 1 accuracy:            13.68%
+    Model 2 accuracy:            14.34%
+    Model 3 accuracy:            19.08%
+------------------------------------

@@ -1,0 +1,8 @@
+Ensemble Top-1 Accuracy: 84.34%
+Ensemble ECE: 0.1426
+Number of models: 5
+Model 1 Accuracy: 80.08%
+Model 2 Accuracy: 79.39%
+Model 3 Accuracy: 79.59%
+Model 4 Accuracy: 79.39%
+Model 5 Accuracy: 78.93%
