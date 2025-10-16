@@ -14,12 +14,14 @@ class DartsClassificationModule(ClassificationModule):
         lr_final: float = 1e-5,
         warmup_epochs: int = 0,
         label_smoothing: float = 0.0,
+        optimizer: str = "SGD",
     ):
         self.auxiliary_loss_weight = auxiliary_loss_weight
         self.max_epochs = max_epochs
         self.lr_final = lr_final
         self.warmup_epochs = max(0, int(warmup_epochs))
         self._drop_path_max = None
+        self.optimizer = optimizer
 
         super().__init__(
             learning_rate=learning_rate,
@@ -32,12 +34,21 @@ class DartsClassificationModule(ClassificationModule):
             self.criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
 
     def configure_optimizers(self):
-        optimizer = torch.optim.SGD(
-            self.parameters(),
-            momentum=0.9,
-            lr=self.hparams.learning_rate,
-            weight_decay=self.hparams.weight_decay
-        )
+        if self.optimizer == "SGD":
+            optimizer = torch.optim.SGD(
+                self.parameters(),
+                momentum=0.9,
+                lr=self.hparams.learning_rate,
+                weight_decay=self.hparams.weight_decay
+            )
+        elif self.optimizer == "AdamW":
+            optimizer = torch.optim.AdamW(
+                self.parameters(),
+                lr=self.hparams.learning_rate,
+                weight_decay=self.hparams.weight_decay
+            )
+        else:
+            raise ValueError(f"Unknown optimizer: {self.hparams.optimizer}")
 
         t_max = max(1, self.max_epochs - self.warmup_epochs)
         cosine = CosineAnnealingLR(optimizer, T_max=t_max, eta_min=self.lr_final)

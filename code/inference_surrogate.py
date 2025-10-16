@@ -112,11 +112,11 @@ class InferSurrogate:
         """
         self._clear_all_buffers()
         
-        # Шаг 1: Подготовка пула потенциальных моделей
-        self._prepare_potential_models()
-        if not self.potential_archs:
-            print("Error: No potential models found after filtering. Can't select an ensemble.")
-            return
+        if strategy != "random":
+            self._prepare_potential_models()
+            if not self.potential_archs:
+                print("Error: No potential models found after filtering. Can't select an ensemble.")
+                return
 
         # Шаг 2: Выбор моделей в соответствии с выбранной стратегией
         print(f"\n--- Running selection with '{strategy}' strategy ---")
@@ -296,7 +296,9 @@ class InferSurrogate:
     def select_randomly(self, archs: List[Dict], n_select: int) -> List[Dict]:
         """Выбирает n_select случайных моделей из предложенного списка."""
         if len(archs) <= n_select:
-            return archs
+            print("Generate random archs, because dont have enough")
+            tmp_archs = generate_arch_dicts(self.config.n_models_to_generate)
+            archs.extend(tmp_archs)
         
         indices = random.sample(range(len(archs)), k=n_select)
         print(f"Randomly selected {len(indices)} models.")
@@ -476,10 +478,11 @@ if __name__ == "__main__":
     print(f"Chosen selection strategy: '{strategy}'")
     inference = InferSurrogate(config)
     
-    inference.initialize_models()
+    if strategy != "random":
+        inference.initialize_models()
 
     try:
-        inference.run_selection(strategy=strategy) # <<-- Передаем сюда нашу переменную
+        inference.run_selection(strategy=strategy)
     except ValueError as e:
         print(f"Error during selection: {e}")
         exit(1)

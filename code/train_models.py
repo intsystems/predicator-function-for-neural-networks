@@ -305,6 +305,7 @@ class DiversityNESRunner:
                     num_classes=self.num_classes,
                     lr_final=self.config.lr_end_final,
                     label_smoothing=0.15,
+                    optimizer=self.config.optimizer,
                 ),
                 trainer=Trainer(
                     gradient_clip_val=5.0,
