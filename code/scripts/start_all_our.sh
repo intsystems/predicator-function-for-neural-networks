@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+cd "$(dirname "$0")/.."
+
 
 export CUDA_VISIBLE_DEVICES="1,2,3"
 
