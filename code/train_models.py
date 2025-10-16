@@ -823,9 +823,7 @@ class DiversityNESRunner:
             archs_list.extend([(cur_index, arch) for arch in archs])
             index_2_n_archs[cur_index] = len(archs)
 
-        if not archs_list:
-            print("No architectures to train!")
-            return
+        assert archs_list, "No architectures to train!"
 
         n_models = len(archs_list)
         available_gpus = self._get_available_gpus()

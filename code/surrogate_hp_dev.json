@@ -6,7 +6,7 @@
     "div_dataset_path": "datasets/CIFAR10_archs",
 
     "device": "cuda:0",
-    "developer_mode": true,
+    "developer_mode": false,
 
     "n_models": 500,
 
@@ -34,7 +34,7 @@
 
     "surrogate_inference_path": "surrogate_models/",
 
-    "use_pretrained_models_for_ensemble": true,
+    "use_pretrained_models_for_ensemble": false,
     "n_ensemble_models": 500,
     "n_models_in_pool": 4096,
     "n_models_to_generate": 5000,
@@ -48,7 +48,7 @@
     "greedy_choice_out_of_best": false,
 
     "train_size_final": 0.2,
-    "n_epochs_final": 100,
+    "n_epochs_final": 1,
     "lr_start_final": 0.025,
     "lr_end_final": 1e-3,
     "weight_decay": 3e-4,
@@ -59,7 +59,7 @@
     "max_per_gpu": 5,
 
     "final_dataset_path": "datasets/final_dataset/",
-    "evaluate_ensemble_flag": true,
+    "evaluate_ensemble_flag": false,
     "n_models_to_evaluate": 2000,
     "output_path": "output/",
     "width": 16,
