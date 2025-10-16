@@ -507,12 +507,8 @@ class DiversityNESRunner:
             )
             train_loader, valid_loader, test_loader = runner.get_data_loaders()
 
-            if config.evaluate_ensemble_flag:
-                model = runner.train_model(architecture, train_loader, None, model_id)
-            else:
-                model = runner.train_model(architecture, train_loader, None, model_id)
-            if model is not None:
-                model = model.to(device)
+            model = runner.train_model(architecture, train_loader, None, model_id)
+            model = model.to(device)
 
             torch.save(model.state_dict(), pth_path / f"model_{model_id}.pth")
             print(f"Model {model_id} saved to {pth_path}")
