@@ -1,17 +1,17 @@
 {
     "seed": 42,
     "num_workers": 20,
-    "dataset_path": "datasets/fashionmnist_united/architectures",
-    "acc_dataset_path": "datasets/fashionmnist_united/architectures",
-    "div_dataset_path": "datasets/fashionmnist_united/architectures",
+    "dataset_path": "datasets/CIFAR10_archs",
+    "acc_dataset_path": "datasets/CIFAR10_archs",
+    "div_dataset_path": "datasets/CIFAR10_archs",
 
     "device": "cuda:0",
     "developer_mode": true,
 
-    "n_models": 2785,
+    "n_models": 500,
 
-    "upper_margin": 0.9,
-    "lower_margin": 0.1,
+    "upper_margin": 0.8,
+    "lower_margin": 0.2,
     "diversity_matrix_metric": "overlap",
 
     "train_size": 0.8,

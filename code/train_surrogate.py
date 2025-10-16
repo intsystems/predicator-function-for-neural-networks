@@ -64,7 +64,7 @@ class SurrogateTrainer:
             preds.append(arr[:num_samples] if num_samples else arr)
         return preds
 
-    def get_diversity_matrix(self, num_samples: Optional[int] = 5500) -> None:
+    def get_diversity_matrix(self, num_samples: Optional[int] = None) -> None:
         n = self.div_n_models
         preds = self._prepare_predictions(num_samples)
 
@@ -186,14 +186,14 @@ class SurrogateTrainer:
             cfg.train_dataset,
             batch_size=cfg.batch_size,
             shuffle=True,
-            num_workers=self.config.num_workers,
+            num_workers=0,
             collate_fn=collate_triplets,
         )
         cfg.valid_loader_diversity = DataLoader(
             cfg.valid_dataset,
             batch_size=1024,
             shuffle=False,
-            num_workers=self.config.num_workers,
+            num_workers=0,
             collate_fn=collate_triplets,
         )
         cfg.train_loader_accuracy = DataLoader(
