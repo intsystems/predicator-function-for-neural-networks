@@ -48,15 +48,15 @@
     "greedy_choice_out_of_best": false,
 
     "train_size_final": 0.2,
-    "n_epochs_final": 1,
+    "n_epochs_final": 100,
     "lr_start_final": 0.025,
     "lr_end_final": 1e-3,
     "weight_decay": 3e-4,
-    "optimizer": "AdamW",
+    "optimizer": "SGD",
     "auxiliary_loss_weight": 0.4,
     "batch_size_final": 96,
     "dataset_name": "CIFAR10",
-    "max_per_gpu": 5,
+    "max_per_gpu": 15,
 
     "final_dataset_path": "datasets/final_dataset/",
     "evaluate_ensemble_flag": false,
