@@ -939,6 +939,7 @@ if __name__ == "__main__":
 
     params = json.loads(Path(args.hyperparameters_json).read_text())
     params["device"] = "cuda:0" if torch.cuda.is_available() else "cpu"
+    assert params["seed"] != -1, "Seed must be set!"
 
     config = TrainConfig(**params)
     info = DatasetsInfo.get(config.dataset_name.lower())
