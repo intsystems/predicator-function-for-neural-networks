@@ -274,8 +274,8 @@ class DiversityNESRunner:
     def train_model(
         self,
         architecture: dict,
-        train_loader: DataLoader,
-        valid_loader: Optional[DataLoader],
+        train_loader,
+        valid_loader,
         model_id: int,
     ) -> Optional[torch.nn.Module]:
         """Обучает одну модель по архитектуре."""
@@ -333,7 +333,7 @@ class DiversityNESRunner:
         self,
         model: torch.nn.Module,
         architecture: dict,
-        data_loader: DataLoader,
+        data_loader,
         folder_name: str,
         model_id: int,
         mode: str = "classes",
@@ -507,12 +507,8 @@ class DiversityNESRunner:
             )
             train_loader, valid_loader, test_loader = runner.get_data_loaders()
 
-            if config.evaluate_ensemble_flag:
-                model = runner.train_model(architecture, train_loader, None, model_id)
-            else:
-                model = runner.train_model(architecture, train_loader, None, model_id)
-            if model is not None:
-                model = model.to(device)
+            model = runner.train_model(architecture, train_loader, None, model_id)
+            model = model.to(device)
 
             torch.save(model.state_dict(), pth_path / f"model_{model_id}.pth")
             print(f"Model {model_id} saved to {pth_path}")
@@ -807,17 +803,36 @@ class DiversityNESRunner:
             pass
 
         print("Loading architectures...")
+        index_2_json_dir = {} 
         latest_index = self.get_latest_index_from_dir()
-        models_json_dir = (
-            Path(self.config.best_models_save_path) / f"models_json_{latest_index}"
-        )
-        print(f"Loading architectures from {models_json_dir}")
-        arch_dicts = load_json_from_directory(models_json_dir)
+        assert latest_index > 0, "No architectures found!"
+        
+        for cur_index in range(1, latest_index + 1):
+            models_json_dir = (
+                Path(self.config.best_models_save_path) / f"models_json_{cur_index}"
+            )
+            index_2_json_dir[cur_index] = models_json_dir
+        
+        archs_list = []  # its array of tuple (json_dir_index, arch_dict)
+        index_2_n_archs = {}
+        for cur_index in index_2_json_dir.keys():
+            print(f"Loading architectures from {index_2_json_dir[cur_index]}")
+            arch_dicts = load_json_from_directory(index_2_json_dir[cur_index])
+            archs = [d["architecture"] for d in arch_dicts]
+            archs_list.extend([(cur_index, arch) for arch in archs])
+            index_2_n_archs[cur_index] = len(archs)
 
-        archs = [d["architecture"] for d in arch_dicts]
-        n_models = len(archs)
+        if not archs_list:
+            print("No architectures to train!")
+            return
 
+        n_models = len(archs_list)
         available_gpus = self._get_available_gpus()
+        
+        if not available_gpus:
+            print("No GPUs available!")
+            return
+            
         n_gpus = len(available_gpus)
         max_per_gpu = self.config.max_per_gpu
         total_processes = n_models
@@ -825,24 +840,31 @@ class DiversityNESRunner:
         print(f"Available GPUs: {available_gpus}")
         print(f"Training {n_models} models, up to {max_per_gpu} per GPU")
 
-        # Создание директорий
+        archs_and_pth_path_list = []
         output_path = Path(self.config.output_path)
-        archs_path = output_path / f"trained_models_archs_{latest_index}"
-        pth_path = output_path / f"trained_models_pth_{latest_index}"
-        archs_path.mkdir(parents=True, exist_ok=True)
-        pth_path.mkdir(parents=True, exist_ok=True)
+        
+        for cur_index in index_2_json_dir.keys():
+            archs_path = output_path / f"trained_models_archs_{cur_index}"
+            pth_path = output_path / f"trained_models_pth_{cur_index}"
+            archs_and_pth_path_list.append((archs_path, pth_path))
+            archs_path.mkdir(parents=True, exist_ok=True)
+            pth_path.mkdir(parents=True, exist_ok=True)
 
-        # Параллельное обучение
         processes = []
-        for idx, arch in enumerate(archs):
+        
+        for idx, (cur_index, arch) in enumerate(archs_list):
             gpu_idx = (idx // max_per_gpu) % n_gpus
             physical_gpu_id = available_gpus[gpu_idx]
+            model_id = idx % index_2_n_archs[cur_index]
+
+            archs_path = output_path / f"trained_models_archs_{cur_index}"
+            pth_path = output_path / f"trained_models_pth_{cur_index}"
 
             p = mp.get_context("spawn").Process(
                 target=self.train_single_model_process,
                 args=(
                     arch,
-                    idx,
+                    model_id,
                     physical_gpu_id,
                     self.config,
                     self.dataset_key,
@@ -855,6 +877,7 @@ class DiversityNESRunner:
             processes.append(p)
             print(f"Started model {idx} on GPU {physical_gpu_id}")
 
+            # Ограничение количества процессов
             while len(processes) >= n_gpus * max_per_gpu:
                 time.sleep(2)
                 for p in processes[:]:
@@ -863,6 +886,7 @@ class DiversityNESRunner:
                         processes.remove(p)
                         break
 
+        # Ожидание завершения всех процессов
         for p in processes:
             p.join()
         print("✅ All models trained!")
@@ -870,23 +894,25 @@ class DiversityNESRunner:
         # Оценка ансамбля
         if self.config.evaluate_ensemble_flag:
             print("📊 Evaluating ensemble...")
-            self.fill_models_list(archs_path, pth_path)
-            if self.models:
-                _, _, test_loader = self.get_data_loaders()
-                stats = collect_ensemble_stats(
-                    models=self.models,
-                    device=self.device,
-                    test_loader=test_loader,
-                    n_ece_bins=self.config.n_ece_bins,
-                    developer_mode=self.config.developer_mode,
-                    mean=self.MEAN,
-                    std=self.STD
-                )
-                self.finalize_ensemble_evaluation(
-                    stats, f"ensemble_results_{latest_index}"
-                )
-            else:
-                print("❌ No models to evaluate.")
+            for cur_index,archs_path, pth_path in enumerate(archs_and_pth_path_list):
+                self.models = []
+                self.fill_models_list(archs_path, pth_path)
+                if self.models:
+                    _, _, test_loader = self.get_data_loaders()
+                    stats = collect_ensemble_stats(
+                        models=self.models,
+                        device=self.device,
+                        test_loader=test_loader,
+                        n_ece_bins=self.config.n_ece_bins,
+                        developer_mode=self.config.developer_mode,
+                        mean=self.MEAN,
+                        std=self.STD
+                    )
+                    self.finalize_ensemble_evaluation(
+                        stats, f"ensemble_results_{cur_index}"
+                    )
+                else:
+                    print("❌ No models to evaluate.")
         else:
             print("⏭️ Ensemble evaluation skipped.")
 
