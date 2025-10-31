@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 
-export CUDA_VISIBLE_DEVICES="0,1,2,3,4,5"
+export CUDA_VISIBLE_DEVICES="7,6"
 
 CONFIG="surrogate_hp_dev.json"
 
