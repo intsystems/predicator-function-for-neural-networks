@@ -50,6 +50,7 @@ class TrainConfig:
     max_per_gpu: int
     train_size_final: float
     n_epochs_final: int
+    optimizer: str
     lr_start_final: float
     lr_end_final: float
     weight_decay: float

@@ -305,6 +305,7 @@ class DiversityNESRunner:
                     num_classes=self.num_classes,
                     lr_final=self.config.lr_end_final,
                     label_smoothing=0.15,
+                    optimizer=self.config.optimizer,
                 ),
                 trainer=Trainer(
                     gradient_clip_val=5.0,
@@ -822,9 +823,7 @@ class DiversityNESRunner:
             archs_list.extend([(cur_index, arch) for arch in archs])
             index_2_n_archs[cur_index] = len(archs)
 
-        if not archs_list:
-            print("No architectures to train!")
-            return
+        assert archs_list, "No architectures to train!"
 
         n_models = len(archs_list)
         available_gpus = self._get_available_gpus()
@@ -940,6 +939,7 @@ if __name__ == "__main__":
 
     params = json.loads(Path(args.hyperparameters_json).read_text())
     params["device"] = "cuda:0" if torch.cuda.is_available() else "cpu"
+    assert params["seed"] != -1, "Seed must be set!"
 
     config = TrainConfig(**params)
     info = DatasetsInfo.get(config.dataset_name.lower())

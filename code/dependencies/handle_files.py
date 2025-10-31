@@ -189,16 +189,43 @@ def collect_and_match(
 # collect_models("datasets/tmp")
 # process_json_logits("datasets/tmp/collected_json", "datasets/tmp/collected_json_max")
 
+# collect_and_match(
+#     [
+#         (
+#             "/home/udeneev-av/RAS/predicator-function-for-neural-networks/code/datasets/CIFAR10_div_part1/trained_models_archs_1",
+#             "/home/udeneev-av/RAS/predicator-function-for-neural-networks/code/datasets/CIFAR10_div_part1/trained_models_pth_1",
+#         ),
+#         (
+#             "/home/udeneev-av/RAS/predicator-function-for-neural-networks/code/datasets/CIFAR10_div_part2/trained_models_archs_1",
+#             "/home/udeneev-av/RAS/predicator-function-for-neural-networks/code/datasets/CIFAR10_div_part2/trained_models_pth_1",
+#         ),
+#         (
+#             "/home/udeneev-av/RAS/predicator-function-for-neural-networks/code/datasets/CIFAR10_div_part3/trained_models_archs_1",
+#             "/home/udeneev-av/RAS/predicator-function-for-neural-networks/code/datasets/CIFAR10_div_part3/trained_models_pth_1",
+#         ),
+#         (
+#             "/home/udeneev-av/RAS/predicator-function-for-neural-networks/code/datasets/CIFAR10_div_part4/trained_models_archs_1",
+#             "/home/udeneev-av/RAS/predicator-function-for-neural-networks/code/datasets/CIFAR10_div_part4/trained_models_pth_1",
+#         ),
+#         (
+#             "/home/udeneev-av/RAS/predicator-function-for-neural-networks/code/datasets/CIFAR10_div_part5/trained_models_archs_1",
+#             "/home/udeneev-av/RAS/predicator-function-for-neural-networks/code/datasets/CIFAR10_div_part5/trained_models_pth_1",
+#         ),
+#     ],
+#     "/home/udeneev-av/RAS/predicator-function-for-neural-networks/code/datasets/CIFAR10_div",
+# )
+
+
 collect_and_match(
     [
         (
-            "/home/udeneev-av/RAS/predicator-function-for-neural-networks/code/output/trained_models_archs_1",
-            "/home/udeneev-av/RAS/predicator-function-for-neural-networks/code/best_models/models_pth_1",
+            "/home/udeneev-av/RAS/predicator-function-for-neural-networks/code/datasets/CIFAR10_div/architectures",
+            "/home/udeneev-av/RAS/predicator-function-for-neural-networks/code/datasets/CIFAR10_div/weights",
         ),
         (
-            "/home/udeneev-av/RAS/predicator-function-for-neural-networks/code/datasets/fashionmnist_acc_archs/architectures",
-            "/home/udeneev-av/RAS/predicator-function-for-neural-networks/code/datasets/fashionmnist_acc_archs/weights",
+            "/home/udeneev-av/RAS/predicator-function-for-neural-networks/code/datasets/CIFAR10_acc_archs/trained_models_archs_1",
+            "/home/udeneev-av/RAS/predicator-function-for-neural-networks/code/datasets/CIFAR10_acc_archs/trained_models_pth_1",
         ),
     ],
-    "/home/udeneev-av/RAS/predicator-function-for-neural-networks/code/datasets/fashionmnist_united",
+    "/home/udeneev-av/RAS/predicator-function-for-neural-networks/code/datasets/CIFAR10_united",
 )
