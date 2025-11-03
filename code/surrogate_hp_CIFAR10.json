@@ -47,8 +47,8 @@
     "random_choice_out_of_best": false,
     "greedy_choice_out_of_best": true,
 
-    "train_size_final": 1,
-    "n_epochs_final": 600,
+    "train_size_final": 0.5,
+    "n_epochs_final": 100,
     "lr_start_final": 0.025,
     "lr_end_final": 1e-3,
     "weight_decay": 3e-4,
@@ -63,6 +63,6 @@
     "n_models_to_evaluate": 2000,
     "output_path": "output/",
     "n_ece_bins": 16,
-    "num_cells": 20,
-    "width": 36
+    "num_cells": 8,
+    "width": 16
 }

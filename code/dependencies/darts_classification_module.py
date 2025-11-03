@@ -77,16 +77,37 @@ class DartsClassificationModule(ClassificationModule):
             loss_main = self.criterion(y_hat, y)
             loss_aux = self.criterion(y_aux, y)
             loss = loss_main + self.auxiliary_loss_weight * loss_aux
-            self.log('train_loss_main', loss_main, prog_bar=False, on_epoch=True, on_step=False)
-            self.log('train_loss_aux', loss_aux, prog_bar=False, on_epoch=True, on_step=False)
+            self.log('train_loss_main', loss_main, prog_bar=False, on_epoch=True, on_step=False, sync_dist=True)
+            self.log('train_loss_aux', loss_aux, prog_bar=False, on_epoch=True, on_step=False, sync_dist=True)
         else:
             y_hat = out[0] if isinstance(out, (tuple, list)) else out
             loss = self.criterion(y_hat, y)
 
-        self.log('train_loss', loss, prog_bar=True, on_epoch=True, on_step=False)
+        self.log('train_loss', loss, prog_bar=True, on_epoch=True, on_step=False, sync_dist=True)
 
-        for name, metric in self.metrics.items():
-            self.log('train_' + name, metric(y_hat, y), prog_bar=True, on_epoch=True, on_step=False)
+        # Явно считаем и логируем accuracy
+        preds = y_hat.argmax(dim=1)
+        acc = (preds == y).float().mean()
+        self.log('train_acc', acc, prog_bar=True, on_epoch=True, on_step=False, sync_dist=True)
+
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        x, y = batch
+        out = self(x)
+
+        if isinstance(out, (tuple, list)):
+            y_hat = out[0]
+        else:
+            y_hat = out
+
+        loss = self.criterion(y_hat, y)
+        self.log('val_loss', loss, prog_bar=True, on_epoch=True, on_step=False, sync_dist=True)
+
+        # Явно считаем и логируем accuracy
+        preds = y_hat.argmax(dim=1)
+        acc = (preds == y).float().mean()
+        self.log('val_acc', acc, prog_bar=True, on_epoch=True, on_step=False, sync_dist=True)
 
         return loss
 
