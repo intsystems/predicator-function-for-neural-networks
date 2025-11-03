@@ -1,0 +1,72 @@
+====================================
+Ensemble Evaluation Results
+====================================
+Ensemble Top-1 Accuracy:             97.88%
+Ensemble ECE:                        0.1357
+Ensemble NLL:                        0.2059
+Oracle Ensemble NLL:                 0.1552
+Normalized Predictive Disagreement:   2.7273
+Number of models:                    5
+Model 1 Top-1 Accuracy:          96.91%
+Model 2 Top-1 Accuracy:          96.70%
+Model 3 Top-1 Accuracy:          96.62%
+Model 4 Top-1 Accuracy:          97.21%
+Model 5 Top-1 Accuracy:          96.85%
+
+--- Adversarial Attack Results (FGSM) ---
+Epsilon = 0.0000
+    Ensemble accuracy:               97.88%
+    Model 1 accuracy:            96.92%
+    Model 2 accuracy:            96.70%
+    Model 3 accuracy:            96.62%
+    Model 4 accuracy:            97.21%
+    Model 5 accuracy:            96.85%
+------------------------------------
+Epsilon = 0.0500
+    Ensemble accuracy:               57.23%
+    Model 1 accuracy:            48.20%
+    Model 2 accuracy:            57.66%
+    Model 3 accuracy:            54.04%
+    Model 4 accuracy:            49.63%
+    Model 5 accuracy:            57.08%
+------------------------------------
+Epsilon = 0.1000
+    Ensemble accuracy:               22.39%
+    Model 1 accuracy:            18.73%
+    Model 2 accuracy:            21.38%
+    Model 3 accuracy:            23.64%
+    Model 4 accuracy:            19.93%
+    Model 5 accuracy:            21.92%
+------------------------------------
+Epsilon = 0.1500
+    Ensemble accuracy:               14.92%
+    Model 1 accuracy:            12.66%
+    Model 2 accuracy:            13.57%
+    Model 3 accuracy:            15.83%
+    Model 4 accuracy:            13.83%
+    Model 5 accuracy:            14.17%
+------------------------------------
+Epsilon = 0.2000
+    Ensemble accuracy:               13.50%
+    Model 1 accuracy:            10.95%
+    Model 2 accuracy:            12.35%
+    Model 3 accuracy:            13.52%
+    Model 4 accuracy:            12.50%
+    Model 5 accuracy:            12.54%
+------------------------------------
+Epsilon = 0.2500
+    Ensemble accuracy:               13.04%
+    Model 1 accuracy:            10.46%
+    Model 2 accuracy:            11.95%
+    Model 3 accuracy:            12.86%
+    Model 4 accuracy:            11.92%
+    Model 5 accuracy:            11.73%
+------------------------------------
+Epsilon = 0.3000
+    Ensemble accuracy:               12.74%
+    Model 1 accuracy:            10.69%
+    Model 2 accuracy:            11.20%
+    Model 3 accuracy:            12.54%
+    Model 4 accuracy:            11.52%
+    Model 5 accuracy:            11.31%
+------------------------------------
