@@ -374,9 +374,10 @@ class DiversityNESRunner:
         with open(file_path, "w") as f:
             json.dump(result, f, indent=4)
         print(f"Results for model_{model_id} saved to {file_path}")
-
     def finalize_ensemble_evaluation(
-            self, stats: Optional[Dict[str, Any]], file_name: str = "ensemble_results"
+            self,
+            stats: Optional[Dict[str, Any]],
+            file_name: str = "ensemble_results"
         ) -> Tuple[Optional[float], Optional[List[float]], Optional[float]]:
         """Финализирует оценку ансамбля: вычисляет метрики и сохраняет результаты."""
         if stats is None:
@@ -395,28 +396,61 @@ class DiversityNESRunner:
         nll = calculate_nll(stats)
         oracle_nll = calculate_oracle_nll(stats)
         normalized_predictive_disagreement = stats.get("normalized_predictive_disagreement", None)
-        adversarial_attack_info = stats.get("adversarial_attack_info", {})
 
-        # -------- Форматированный print ----------
-        print("="*36)
+        # --- получаем все типы атак ---
+        fgsm_results = stats.get("fgsm_results", {})
+        bim_results = stats.get("bim_results", {})
+        pgd_results = stats.get("pgd_results", {})
+
+        # -------- Форматированный вывод ----------
+        print("=" * 36)
         print("Ensemble Evaluation Results")
-        print("="*36)
+        print("=" * 36)
         print(f"Ensemble Top-1 Accuracy:             {ensemble_acc:.2f}%")
         print(f"Ensemble ECE:                        {ece:.4f}")
         print(f"Ensemble NLL:                        {nll:.4f}")
         print(f"Oracle Ensemble NLL:                 {oracle_nll:.4f}")
-        print(f"Normalized Predictive Disagreement:   {normalized_predictive_disagreement:.4f}")
+        print(f"Normalized Predictive Disagreement:  {normalized_predictive_disagreement:.4f}")
         print(f"Number of models:                    {num_models}")
         for i, acc in enumerate(model_accs):
             print(f"Model {i+1} Top-1 Accuracy:          {acc:.2f}%")
+
+        # === FGSM ===
         print("\n--- Adversarial Attack Results (FGSM) ---")
-        if adversarial_attack_info:
-            for eps, eps_info in sorted(adversarial_attack_info.items()):
+        if fgsm_results:
+            for eps, eps_info in sorted(fgsm_results.items()):
                 print(f"Epsilon = {eps:.4f}")
                 print(f"    Ensemble accuracy:               {eps_info['ensemble_acc']:.2f}%")
                 for i, acc in enumerate(eps_info["model_accs"]):
                     print(f"    Model {i+1} accuracy:            {acc:.2f}%")
-                print("-"*36)
+                print("-" * 36)
+        else:
+            print("FGSM results not available.")
+
+        # === BIM ===
+        print("\n--- Adversarial Attack Results (BIM) ---")
+        if bim_results:
+            for eps, eps_info in sorted(bim_results.items()):
+                print(f"Epsilon = {eps:.4f}")
+                print(f"    Ensemble accuracy:               {eps_info['ensemble_acc']:.2f}%")
+                for i, acc in enumerate(eps_info["model_accs"]):
+                    print(f"    Model {i+1} accuracy:            {acc:.2f}%")
+                print("-" * 36)
+        else:
+            print("BIM results not available.")
+
+        # === PGD ===
+        print("\n--- Adversarial Attack Results (PGD) ---")
+        if pgd_results:
+            for eps, eps_info in sorted(pgd_results.items()):
+                print(f"Epsilon = {eps:.4f}")
+                print(f"    Ensemble accuracy:               {eps_info['ensemble_acc']:.2f}%")
+                for i, acc in enumerate(eps_info["model_accs"]):
+                    print(f"    Model {i+1} accuracy:            {acc:.2f}%")
+                print("-" * 36)
+        else:
+            print("PGD results not available.")
+
         print(f"\nResults saved to file: {file_name}\n")
 
         # --------- Запись в файл --------------
@@ -426,25 +460,53 @@ class DiversityNESRunner:
         out_file = output_path / f"{file_name}_{experiment_num}.txt"
 
         with open(out_file, "w") as f:
-            f.write("="*36 + "\n")
+            f.write("=" * 36 + "\n")
             f.write("Ensemble Evaluation Results\n")
-            f.write("="*36 + "\n")
+            f.write("=" * 36 + "\n")
             f.write(f"Ensemble Top-1 Accuracy:             {ensemble_acc:.2f}%\n")
             f.write(f"Ensemble ECE:                        {ece:.4f}\n")
             f.write(f"Ensemble NLL:                        {nll:.4f}\n")
             f.write(f"Oracle Ensemble NLL:                 {oracle_nll:.4f}\n")
-            f.write(f"Normalized Predictive Disagreement:   {normalized_predictive_disagreement:.4f}\n")
+            f.write(f"Normalized Predictive Disagreement:  {normalized_predictive_disagreement:.4f}\n")
             f.write(f"Number of models:                    {num_models}\n")
             for i, acc in enumerate(model_accs):
                 f.write(f"Model {i+1} Top-1 Accuracy:          {acc:.2f}%\n")
+
+            # Запись FGSM
             f.write("\n--- Adversarial Attack Results (FGSM) ---\n")
-            if adversarial_attack_info:
-                for eps, eps_info in sorted(adversarial_attack_info.items()):
+            if fgsm_results:
+                for eps, eps_info in sorted(fgsm_results.items()):
                     f.write(f"Epsilon = {eps:.4f}\n")
                     f.write(f"    Ensemble accuracy:               {eps_info['ensemble_acc']:.2f}%\n")
                     for i, acc in enumerate(eps_info["model_accs"]):
                         f.write(f"    Model {i+1} accuracy:            {acc:.2f}%\n")
-                    f.write("-"*36 + "\n")
+                    f.write("-" * 36 + "\n")
+            else:
+                f.write("FGSM results not available.\n")
+
+            # Запись BIM
+            f.write("\n--- Adversarial Attack Results (BIM) ---\n")
+            if bim_results:
+                for eps, eps_info in sorted(bim_results.items()):
+                    f.write(f"Epsilon = {eps:.4f}\n")
+                    f.write(f"    Ensemble accuracy:               {eps_info['ensemble_acc']:.2f}%\n")
+                    for i, acc in enumerate(eps_info["model_accs"]):
+                        f.write(f"    Model {i+1} accuracy:            {acc:.2f}%\n")
+                    f.write("-" * 36 + "\n")
+            else:
+                f.write("BIM results not available.\n")
+
+            # Запись PGD
+            f.write("\n--- Adversarial Attack Results (PGD) ---\n")
+            if pgd_results:
+                for eps, eps_info in sorted(pgd_results.items()):
+                    f.write(f"Epsilon = {eps:.4f}\n")
+                    f.write(f"    Ensemble accuracy:               {eps_info['ensemble_acc']:.2f}%\n")
+                    for i, acc in enumerate(eps_info["model_accs"]):
+                        f.write(f"    Model {i+1} accuracy:            {acc:.2f}%\n")
+                    f.write("-" * 36 + "\n")
+            else:
+                f.write("PGD results not available.\n")
 
         print(f"Results saved to {out_file}")
         return ensemble_acc, model_accs, ece

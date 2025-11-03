@@ -147,15 +147,44 @@ def collect_ensemble_stats(
         predictive_disagreement / avg_model_err if avg_model_err > 0 else float("nan")
     )
 
-    fgsm_attack_epsilons = [0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3]
-    adversarial_attack_info = adversarial_attack(
+    # --- FGSM ---
+    fgsm_epsilons = [0, 0.02, 0.04, 0.08, 0.12]
+    fgsm_results = adversarial_attack(
         valid_models,
         test_loader,
-        fgsm_attack_epsilons,
+        fgsm_epsilons,
         device=device,
         mean=mean,
         std=std,
+        attack_type="FGSM"
     )
+
+    # --- BIM ---
+    bim_epsilons = [0, 0.03, 0.06, 0.09, 0.12, 0.15]
+    bim_results = adversarial_attack(
+        valid_models,
+        test_loader,
+        bim_epsilons,
+        device=device,
+        mean=mean,
+        std=std,
+        attack_type="BIM",
+        num_steps=12
+    )
+
+    # --- PGD ---
+    pgd_epsilons = [0, 0.02, 0.04, 0.08, 0.1]
+    pgd_results = adversarial_attack(
+        valid_models,
+        test_loader,
+        pgd_epsilons,
+        device=device,
+        mean=mean,
+        std=std,
+        attack_type="PGD",
+        num_steps=20
+    )
+
 
     return {
         "total": total,
@@ -171,7 +200,9 @@ def collect_ensemble_stats(
         "predictive_disagreement": predictive_disagreement,
         "normalized_predictive_disagreement": normalized_predictive_disagreement,
         "avg_model_err": avg_model_err,
-        "adversarial_attack_info": adversarial_attack_info,
+        "fgsm_results": fgsm_results,
+        "bim_results": bim_results,
+        "pgd_results": pgd_results,
     }
 
 
@@ -232,13 +263,204 @@ def normalize(tensor, mean, std):
     return (tensor - mean) / std
 
 
-def fgsm_attack(image, epsilon, data_grad):
-    sign_data_grad = data_grad.sign()
-    perturbed_image = image + epsilon * sign_data_grad
-    perturbed_image = torch.clamp(perturbed_image, 0, 1)
-    return perturbed_image
+def _ensemble_forward(models, images_norm, labels=None):
+    """Вычисление средних логитов ансамбля и (опционально) loss."""
+    logits_sum = None
+    for model in models:
+        model.eval()
+        logits = model(images_norm)
+        if logits_sum is None:
+            logits_sum = torch.zeros_like(logits)
+        logits_sum += logits
+    avg_logits = logits_sum / len(models)
+    if labels is not None:
+        loss = F.cross_entropy(avg_logits, labels)
+        return avg_logits, loss
+    return avg_logits
 
 
+# ===== FGSM =====
+def adversarial_attack_fgsm(
+    models, test_loader, epsilon_list, device, mean, std
+):
+    """FGSM-атака для ансамбля моделей."""
+    mean_tensor = torch.tensor(mean, device=device).view(1, -1, 1, 1)
+    std_tensor = torch.tensor(std, device=device).view(1, -1, 1, 1)
+
+    results = {}
+    for epsilon in epsilon_list:
+        total = 0
+        correct_ensemble = 0
+        correct_models = [0 for _ in models]
+
+        for images, labels in tqdm(test_loader, desc=f"FGSM (eps={epsilon})"):
+            images, labels = images.to(device), labels.to(device)
+            images_denorm = torch.clamp(images * std_tensor + mean_tensor, 0, 1)
+
+            images_adv = images_denorm.clone().detach().requires_grad_(True)
+            avg_logits, loss = _ensemble_forward(
+                models, (images_adv - mean_tensor) / std_tensor, labels
+            )
+            loss.backward()
+            grad_sign = images_adv.grad.detach().sign()
+            adv_images = torch.clamp(images_denorm + epsilon * grad_sign, 0, 1)
+
+            # --- Оценка ---
+            perturbed_norm = (adv_images - mean_tensor) / std_tensor
+            total += labels.size(0)
+            avg_output = None
+            for idx, model in enumerate(models):
+                output = model(perturbed_norm).softmax(dim=1)
+                _, pred = output.max(1)
+                correct_models[idx] += (pred == labels).sum().item()
+                if avg_output is None:
+                    avg_output = torch.zeros_like(output)
+                avg_output += output
+            avg_output /= len(models)
+            _, ens_pred = avg_output.max(1)
+            correct_ensemble += (ens_pred == labels).sum().item()
+
+        ensemble_acc = correct_ensemble / total * 100.0
+        model_accs = [correct / total * 100.0 for correct in correct_models]
+        results[epsilon] = {
+            "ensemble_acc": ensemble_acc,
+            "model_accs": model_accs,
+            "attack_type": "FGSM",
+            "num_steps": 1,
+        }
+
+    return results
+
+
+# ===== BIM (Iterative FGSM / I-FGSM) =====
+def adversarial_attack_bim(
+    models, test_loader, epsilon_list, device, mean, std, num_steps=10
+):
+    """BIM (итеративная FGSM) атака для ансамбля моделей."""
+    mean_tensor = torch.tensor(mean, device=device).view(1, -1, 1, 1)
+    std_tensor = torch.tensor(std, device=device).view(1, -1, 1, 1)
+
+    results = {}
+    for epsilon in epsilon_list:
+        total = 0
+        correct_ensemble = 0
+        correct_models = [0 for _ in models]
+        alpha = epsilon / num_steps
+
+        for images, labels in tqdm(test_loader, desc=f"BIM (eps={epsilon})"):
+            images, labels = images.to(device), labels.to(device)
+            images_denorm = torch.clamp(images * std_tensor + mean_tensor, 0, 1)
+            adv_images = images_denorm.clone().detach()
+
+            for _ in range(num_steps):
+                adv_images.requires_grad_(True)
+                _, loss = _ensemble_forward(
+                    models, (adv_images - mean_tensor) / std_tensor, labels
+                )
+                loss.backward()
+                grad_sign = adv_images.grad.detach().sign()
+
+                adv_images = adv_images + alpha * grad_sign
+                eta = torch.clamp(
+                    adv_images - images_denorm, min=-epsilon, max=epsilon
+                )
+                adv_images = torch.clamp(images_denorm + eta, 0, 1).detach()
+
+            # --- Оценка ---
+            perturbed_norm = (adv_images - mean_tensor) / std_tensor
+            total += labels.size(0)
+            avg_output = None
+            for idx, model in enumerate(models):
+                output = model(perturbed_norm).softmax(dim=1)
+                _, pred = output.max(1)
+                correct_models[idx] += (pred == labels).sum().item()
+                if avg_output is None:
+                    avg_output = torch.zeros_like(output)
+                avg_output += output
+            avg_output /= len(models)
+            _, ens_pred = avg_output.max(1)
+            correct_ensemble += (ens_pred == labels).sum().item()
+
+        ensemble_acc = correct_ensemble / total * 100.0
+        model_accs = [correct / total * 100.0 for correct in correct_models]
+        results[epsilon] = {
+            "ensemble_acc": ensemble_acc,
+            "model_accs": model_accs,
+            "attack_type": "BIM",
+            "num_steps": num_steps,
+        }
+
+    return results
+
+
+# ===== PGD =====
+def adversarial_attack_pgd(
+    models, test_loader, epsilon_list, device, mean, std, num_steps=10
+):
+    """PGD атака для ансамбля."""
+    mean_tensor = torch.tensor(mean, device=device).view(1, -1, 1, 1)
+    std_tensor = torch.tensor(std, device=device).view(1, -1, 1, 1)
+
+    results = {}
+    for epsilon in epsilon_list:
+        total = 0
+        correct_ensemble = 0
+        correct_models = [0 for _ in models]
+        alpha = epsilon / num_steps
+
+        for images, labels in tqdm(test_loader, desc=f"PGD (eps={epsilon})"):
+            images, labels = images.to(device), labels.to(device)
+            images_denorm = torch.clamp(images * std_tensor + mean_tensor, 0, 1)
+
+            # Случайная инициализация
+            adv_images = (
+                images_denorm.clone().detach()
+                + torch.empty_like(images_denorm).uniform_(-epsilon, epsilon)
+            )
+            adv_images = torch.clamp(adv_images, 0, 1)
+
+            for _ in range(num_steps):
+                adv_images.requires_grad_(True)
+                _, loss = _ensemble_forward(
+                    models, (adv_images - mean_tensor) / std_tensor, labels
+                )
+                loss.backward()
+                grad_sign = adv_images.grad.detach().sign()
+
+                adv_images = adv_images + alpha * grad_sign
+                eta = torch.clamp(
+                    adv_images - images_denorm, min=-epsilon, max=epsilon
+                )
+                adv_images = torch.clamp(images_denorm + eta, 0, 1).detach()
+
+            # --- Оценка ---
+            perturbed_norm = (adv_images - mean_tensor) / std_tensor
+            total += labels.size(0)
+            avg_output = None
+            for idx, model in enumerate(models):
+                output = model(perturbed_norm).softmax(dim=1)
+                _, pred = output.max(1)
+                correct_models[idx] += (pred == labels).sum().item()
+                if avg_output is None:
+                    avg_output = torch.zeros_like(output)
+                avg_output += output
+            avg_output /= len(models)
+            _, ens_pred = avg_output.max(1)
+            correct_ensemble += (ens_pred == labels).sum().item()
+
+        ensemble_acc = correct_ensemble / total * 100.0
+        model_accs = [correct / total * 100.0 for correct in correct_models]
+        results[epsilon] = {
+            "ensemble_acc": ensemble_acc,
+            "model_accs": model_accs,
+            "attack_type": "PGD",
+            "num_steps": num_steps,
+        }
+
+    return results
+
+
+# ===== Обертка =====
 def adversarial_attack(
     models,
     test_loader,
@@ -246,80 +468,24 @@ def adversarial_attack(
     device=None,
     mean=None,
     std=None,
+    attack_type="FGSM",
+    num_steps=10,
 ):
-    if device is None:
-        device = next(models[0].parameters()).device
+    """
+    Унифицированная обертка для выбора типа атаки.
+    attack_type: "FGSM", "BIM", "PGD"
+    """
+    attack_type = attack_type.upper()
 
-    if mean is None or std is None:
-        raise ValueError(
-            "Параметры mean и std обязательны для корректной атаки на нормализованных данных!"
+    if attack_type == "FGSM":
+        return adversarial_attack_fgsm(models, test_loader, epsilon_list, device, mean, std)
+    elif attack_type == "BIM":
+        return adversarial_attack_bim(
+            models, test_loader, epsilon_list, device, mean, std, num_steps
         )
-
-    # Преобразуем mean/std в тензоры на устройстве (для denormalize/normalize)
-    mean_tensor = torch.tensor(mean, device=device).view(1, -1, 1, 1)
-    std_tensor = torch.tensor(std, device=device).view(1, -1, 1, 1)
-
-    results = {}
-
-    for epsilon in epsilon_list:
-        total = 0
-        correct_ensemble = 0
-        correct_models = [0 for _ in models]
-
-        for images, labels in tqdm(test_loader, desc=f"Attack (eps={epsilon})"):
-            images = images.to(device)
-            labels = labels.to(device)
-
-            # === Денормализуем → получаем изображения в [0, 1] ===
-            images_denorm = images * std_tensor + mean_tensor
-            images_denorm = torch.clamp(
-                images_denorm, 0, 1
-            )  # на случай численных ошибок
-
-            # Создаём копию с градиентами в [0,1] пространстве
-            images_adv = images_denorm.clone().detach().requires_grad_(True)
-
-            # === Прямой проход: нормализуем перед подачей в модель! ===
-            logits_sum = None
-            for model in models:
-                model.eval()
-                # Нормализуем images_adv → как ожидалось моделью
-                images_norm = (images_adv - mean_tensor) / std_tensor
-                logits = model(images_norm)
-                if logits_sum is None:
-                    logits_sum = torch.zeros_like(logits)
-                logits_sum += logits
-
-            avg_logits = logits_sum / len(models)
-            loss = F.cross_entropy(avg_logits, labels)
-            loss.backward()
-            data_grad = images_adv.grad.data
-
-            # === Применяем FGSM в [0,1] пространстве ===
-            perturbed_denorm = fgsm_attack(images_denorm, epsilon, data_grad)
-
-            # === Нормализуем для оценки ===
-            perturbed_norm = (perturbed_denorm - mean_tensor) / std_tensor
-
-            # === Оценка на возмущённых данных ===
-            with torch.inference_mode():
-                total += labels.size(0)
-                avg_output = None
-                for idx, model in enumerate(models):
-                    model.eval()
-                    output = model(perturbed_norm).softmax(dim=1)
-                    _, pred = output.max(1)
-                    correct_models[idx] += (pred == labels).sum().item()
-                    if avg_output is None:
-                        avg_output = torch.zeros_like(output)
-                    avg_output += output
-
-                avg_output /= len(models)
-                _, ens_pred = avg_output.max(1)
-                correct_ensemble += (ens_pred == labels).sum().item()
-
-        ensemble_acc = correct_ensemble / total * 100.0
-        model_accs = [correct / total * 100.0 for correct in correct_models]
-        results[epsilon] = {"ensemble_acc": ensemble_acc, "model_accs": model_accs}
-
-    return results
+    elif attack_type == "PGD":
+        return adversarial_attack_pgd(
+            models, test_loader, epsilon_list, device, mean, std, num_steps
+        )
+    else:
+        raise ValueError(f"Неизвестный тип атаки: {attack_type}. Ожидается FGSM, BIM или PGD.")
