@@ -6,7 +6,7 @@
     "div_dataset_path": "datasets/CIFAR10_united/architectures",
 
     "device": "cuda:0",
-    "developer_mode": true,
+    "developer_mode": false,
 
     "n_models": 2944,
 
@@ -55,7 +55,7 @@
     "optimizer": "SGD",
     "auxiliary_loss_weight": 0.4,
     "batch_size_final": 96,
-    "dataset_name": "FashionMNIST",
+    "dataset_name": "CIFAR10",
     "max_per_gpu": 5,
 
     "final_dataset_path": "datasets/final_dataset/",
