@@ -6,7 +6,7 @@
     "div_dataset_path": "datasets/CIFAR10_united/architectures",
 
     "device": "cuda:0",
-    "developer_mode": false,
+    "developer_mode": true,
 
     "n_models": 2944,
 
