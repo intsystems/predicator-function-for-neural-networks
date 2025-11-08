@@ -34,7 +34,7 @@
 
     "surrogate_inference_path": "surrogate_models/",
 
-    "use_pretrained_models_for_ensemble": false,
+    "use_pretrained_models_for_ensemble": true,
     "n_ensemble_models": 5,
     "n_models_in_pool": 4096,
     "n_models_to_generate": 4096000,
