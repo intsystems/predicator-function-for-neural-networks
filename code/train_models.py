@@ -1032,7 +1032,7 @@ class DiversityNESRunner:
         # Оценка ансамбля
         if self.config.evaluate_ensemble_flag:
             print("📊 Evaluating ensemble...")
-            for cur_index,archs_path, pth_path in enumerate(archs_and_pth_path_list):
+            for cur_index, (archs_path, pth_path) in enumerate(archs_and_pth_path_list):
                 self.models = []
                 self.fill_models_list(archs_path, pth_path)
                 if self.models:
