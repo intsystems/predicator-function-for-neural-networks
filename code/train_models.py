@@ -251,16 +251,16 @@ class DiversityNESRunner:
         split = int(num_samples * self.config.train_size_final)
         train_subset = Subset(train_data, indices[:split])
         train_loader = DataLoader(
-            train_subset, batch_size=bs, num_workers=10, shuffle=True
+            train_subset, batch_size=bs, num_workers=00, shuffle=True
         )
 
         split_valid = int(num_samples * self.config.train_size_final)
         valid_subset = Subset(train_data, indices[split_valid:])
         valid_loader = DataLoader(
-            valid_subset, batch_size=bs, num_workers=10, shuffle=False
+            valid_subset, batch_size=bs, num_workers=0, shuffle=False
         )
 
-        test_loader = DataLoader(test_data, batch_size=bs, num_workers=0, shuffle=False)
+        test_loader = DataLoader(test_data, batch_size=bs, num_workers=20, shuffle=False)
         return train_loader, valid_loader, test_loader
 
     @staticmethod
@@ -649,14 +649,28 @@ class DiversityNESRunner:
 
             model = runner.train_model(architecture, train_loader, None, model_id)
             model = model.to(device)
+            max_retries = 99999
+            retry_delay = 300
 
-            torch.save(model.state_dict(), pth_path / f"model_{model_id}.pth")
-            print(f"Model {model_id} saved to {pth_path}")
+            for attempt in range(max_retries + 1):
+                try:
+                    torch.save(model.state_dict(), pth_path / f"model_{model_id}.pth")
+                    print(f"Model {model_id} saved to {pth_path}")
 
-            eval_loader = test_loader if config.evaluate_ensemble_flag else valid_loader
-            runner.evaluate_and_save_results(
-                model, architecture, eval_loader, str(archs_path), model_id=model_id
-            )
+                    eval_loader = test_loader if config.evaluate_ensemble_flag else valid_loader
+                    runner.evaluate_and_save_results(
+                        model, architecture, eval_loader, str(archs_path), model_id=model_id
+                    )
+                    break
+                except Exception as e:
+                    print(f"Attempt {attempt + 1} failed with error: {e}")
+
+                    if attempt < max_retries:
+                        print(f"Retrying in {retry_delay} seconds...")
+                        time.sleep(retry_delay)
+                    else:
+                        print(f"Failed to save and evaluate model {model_id} after {max_retries + 1} attempts.")
+                        raise
 
         except Exception as e:
             print(f"Error in process {model_id}: {e}")
@@ -926,7 +940,7 @@ class DiversityNESRunner:
         # last_index = self.get_latest_index_from_dir(root_dir)
         last_index = self._get_free_file_index_dir(root_dir, "trained_models_archs")
         print(f"Last index: {last_index}")
-        for idx in range(1, last_index):
+        for idx in range(1, last_index + 1):
             if (root_dir / f"trained_models_archs_{idx}").exists() and (
                 root_dir / f"trained_models_pth_{idx}"
             ).exists():

@@ -3,9 +3,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 
-export CUDA_VISIBLE_DEVICES="7"
+export CUDA_VISIBLE_DEVICES="7,6,5,3,2"
 
-CONFIG="surrogate_hp_CIFAR10.json"
+CONFIG="surrogate_hp_CIFAR100.json"
 
 echo
 echo "🚀 Начинаем выполнение скрипта train_models.py"
