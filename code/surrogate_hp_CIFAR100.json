@@ -37,7 +37,7 @@
     "use_pretrained_models_for_ensemble": true,
     "n_ensemble_models": 1000,
     "n_models_in_pool": 4096,
-    "n_models_to_generate": 4096000,
+    "n_models_to_generate": 4096,
     "batch_size_inference": 4096,
     "min_accuracy_for_pool": 0.7645,
     "acc_distance_gamma": 1,
