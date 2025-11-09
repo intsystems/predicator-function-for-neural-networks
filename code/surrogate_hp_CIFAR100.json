@@ -6,7 +6,7 @@
     "div_dataset_path": "datasets/CIFAR100_united/architectures",
 
     "device": "cuda:0",
-    "developer_mode": true,
+    "developer_mode": false,
 
     "n_models": 2944,
 
@@ -44,10 +44,10 @@
     "min_acc_and_div_to_ensemble": 0.9,
     "best_models_save_path": "best_models/",
     "tmp_archs_path": "datasets/tmp_archs/",
-    "random_choice_out_of_best": false,
+    "random_choice_out_of_best": true,
     "greedy_choice_out_of_best": false,
 
-    "train_size_final": 1,
+    "train_size_final": 0.2,
     "n_epochs_final": 100,
     "lr_start_final": 0.025,
     "lr_end_final": 1e-3,

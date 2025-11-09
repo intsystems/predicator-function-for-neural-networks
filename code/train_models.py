@@ -260,7 +260,9 @@ class DiversityNESRunner:
             valid_subset, batch_size=bs, num_workers=0, shuffle=False
         )
 
-        test_loader = DataLoader(test_data, batch_size=bs, num_workers=20, shuffle=False)
+        test_loader = DataLoader(
+            test_data, batch_size=bs, num_workers=20, shuffle=False
+        )
         return train_loader, valid_loader, test_loader
 
     @staticmethod
@@ -374,18 +376,17 @@ class DiversityNESRunner:
         with open(file_path, "w") as f:
             json.dump(result, f, indent=4)
         print(f"Results for model_{model_id} saved to {file_path}")
+
     def finalize_ensemble_evaluation(
-        self,
-        stats: Optional[Dict[str, Any]],
-        file_name: str = "ensemble_results"
+        self, stats: Optional[Dict[str, Any]], file_name: str = "ensemble_results"
     ) -> Tuple[Optional[float], Optional[List[float]], Optional[float]]:
         """
         Финализирует оценку ансамбля: вычисляет метрики и сохраняет результаты.
-        
+
         Args:
             stats: Словарь со статистикой из collect_ensemble_stats
             file_name: Базовое имя файла для сохранения результатов
-        
+
         Returns:
             Tuple: (ensemble_accuracy, model_accuracies, ece)
         """
@@ -408,10 +409,12 @@ class DiversityNESRunner:
         nll = calculate_nll(stats)
         oracle_nll = calculate_oracle_nll(stats)
         brier_score = calculate_brier_score(stats)
-        
+
         # Метрики разнообразия
         predictive_disagreement = stats.get("predictive_disagreement", float("nan"))
-        normalized_predictive_disagreement = stats.get("normalized_predictive_disagreement", float("nan"))
+        normalized_predictive_disagreement = stats.get(
+            "normalized_predictive_disagreement", float("nan")
+        )
         ambiguity = stats.get("ambiguity", float("nan"))
 
         # Adversarial атаки
@@ -423,27 +426,29 @@ class DiversityNESRunner:
         print("=" * 60)
         print("ENSEMBLE EVALUATION RESULTS")
         print("=" * 60)
-        
+
         print("\n--- Basic Metrics ---")
         print(f"Number of models:                    {num_models}")
         print(f"Total samples:                       {total}")
         print(f"Ensemble Top-1 Accuracy:             {ensemble_acc:.2f}%")
         print(f"Average Model Top-1 Accuracy:        {avg_model_acc:.2f}%")
-        
+
         print("\n--- Individual Model Accuracies ---")
         for i, acc in enumerate(model_accs):
             print(f"  Model {i+1} Top-1 Accuracy:        {acc:.2f}%")
-        
+
         print("\n--- Calibration Metrics ---")
         print(f"Expected Calibration Error (ECE):    {ece:.4f}")
         print(f"Negative Log-Likelihood (NLL):       {nll:.4f}")
         print(f"Oracle NLL:                          {oracle_nll:.4f}")
         print(f"Brier Score:                         {brier_score:.4f}")
-        
+
         print("\n--- Diversity Metrics ---")
         print(f"Ambiguity (Ensemble Benefit):        {ambiguity:.4f}")
         print(f"Predictive Disagreement:             {predictive_disagreement:.4f}")
-        print(f"Normalized Pred. Disagreement:       {normalized_predictive_disagreement:.4f}")
+        print(
+            f"Normalized Pred. Disagreement:       {normalized_predictive_disagreement:.4f}"
+        )
 
         # === FGSM ===
         print("\n" + "=" * 60)
@@ -452,7 +457,9 @@ class DiversityNESRunner:
         if fgsm_results:
             for eps, eps_info in sorted(fgsm_results.items()):
                 print(f"\nEpsilon = {eps:.4f}")
-                print(f"  Ensemble accuracy:                 {eps_info['ensemble_acc']:.2f}%")
+                print(
+                    f"  Ensemble accuracy:                 {eps_info['ensemble_acc']:.2f}%"
+                )
                 for i, acc in enumerate(eps_info["model_accs"]):
                     print(f"  Model {i+1} accuracy:              {acc:.2f}%")
         else:
@@ -463,11 +470,17 @@ class DiversityNESRunner:
         print("ADVERSARIAL ATTACK RESULTS (BIM)")
         print("=" * 60)
         if bim_results:
-            num_steps_bim = list(bim_results.values())[0].get("num_steps", "N/A") if bim_results else "N/A"
+            num_steps_bim = (
+                list(bim_results.values())[0].get("num_steps", "N/A")
+                if bim_results
+                else "N/A"
+            )
             print(f"Number of iterations: {num_steps_bim}")
             for eps, eps_info in sorted(bim_results.items()):
                 print(f"\nEpsilon = {eps:.4f}")
-                print(f"  Ensemble accuracy:                 {eps_info['ensemble_acc']:.2f}%")
+                print(
+                    f"  Ensemble accuracy:                 {eps_info['ensemble_acc']:.2f}%"
+                )
                 for i, acc in enumerate(eps_info["model_accs"]):
                     print(f"  Model {i+1} accuracy:              {acc:.2f}%")
         else:
@@ -478,11 +491,17 @@ class DiversityNESRunner:
         print("ADVERSARIAL ATTACK RESULTS (PGD)")
         print("=" * 60)
         if pgd_results:
-            num_steps_pgd = list(pgd_results.values())[0].get("num_steps", "N/A") if pgd_results else "N/A"
+            num_steps_pgd = (
+                list(pgd_results.values())[0].get("num_steps", "N/A")
+                if pgd_results
+                else "N/A"
+            )
             print(f"Number of iterations: {num_steps_pgd}")
             for eps, eps_info in sorted(pgd_results.items()):
                 print(f"\nEpsilon = {eps:.4f}")
-                print(f"  Ensemble accuracy:                 {eps_info['ensemble_acc']:.2f}%")
+                print(
+                    f"  Ensemble accuracy:                 {eps_info['ensemble_acc']:.2f}%"
+                )
                 for i, acc in enumerate(eps_info["model_accs"]):
                     print(f"  Model {i+1} accuracy:              {acc:.2f}%")
         else:
@@ -500,35 +519,41 @@ class DiversityNESRunner:
             f.write("=" * 60 + "\n")
             f.write("ENSEMBLE EVALUATION RESULTS\n")
             f.write("=" * 60 + "\n")
-            
+
             f.write("\n--- Basic Metrics ---\n")
             f.write(f"Number of models:                    {num_models}\n")
             f.write(f"Total samples:                       {total}\n")
             f.write(f"Ensemble Top-1 Accuracy:             {ensemble_acc:.2f}%\n")
             f.write(f"Average Model Top-1 Accuracy:        {avg_model_acc:.2f}%\n")
-            
+
             f.write("\n--- Individual Model Accuracies ---\n")
             for i, acc in enumerate(model_accs):
                 f.write(f"  Model {i+1} Top-1 Accuracy:        {acc:.2f}%\n")
-            
+
             f.write("\n--- Calibration Metrics ---\n")
             f.write(f"Expected Calibration Error (ECE):    {ece:.4f}\n")
             f.write(f"Negative Log-Likelihood (NLL):       {nll:.4f}\n")
             f.write(f"Oracle NLL:                          {oracle_nll:.4f}\n")
             f.write(f"Brier Score:                         {brier_score:.4f}\n")
-            
+
             f.write("\n--- Diversity Metrics ---\n")
             f.write(f"Ambiguity (Ensemble Benefit):        {ambiguity:.4f}\n")
-            f.write(f"Predictive Disagreement:             {predictive_disagreement:.4f}\n")
-            f.write(f"Normalized Pred. Disagreement:       {normalized_predictive_disagreement:.4f}\n")
-            
+            f.write(
+                f"Predictive Disagreement:             {predictive_disagreement:.4f}\n"
+            )
+            f.write(
+                f"Normalized Pred. Disagreement:       {normalized_predictive_disagreement:.4f}\n"
+            )
+
             f.write("\n" + "=" * 60 + "\n")
             f.write("ADVERSARIAL ATTACK RESULTS (FGSM)\n")
             f.write("=" * 60 + "\n")
             if fgsm_results:
                 for eps, eps_info in sorted(fgsm_results.items()):
                     f.write(f"\nEpsilon = {eps:.4f}\n")
-                    f.write(f"  Ensemble accuracy:                 {eps_info['ensemble_acc']:.2f}%\n")
+                    f.write(
+                        f"  Ensemble accuracy:                 {eps_info['ensemble_acc']:.2f}%\n"
+                    )
                     for i, acc in enumerate(eps_info["model_accs"]):
                         f.write(f"  Model {i+1} accuracy:              {acc:.2f}%\n")
             else:
@@ -538,11 +563,17 @@ class DiversityNESRunner:
             f.write("ADVERSARIAL ATTACK RESULTS (BIM)\n")
             f.write("=" * 60 + "\n")
             if bim_results:
-                num_steps_bim = list(bim_results.values())[0].get("num_steps", "N/A") if bim_results else "N/A"
+                num_steps_bim = (
+                    list(bim_results.values())[0].get("num_steps", "N/A")
+                    if bim_results
+                    else "N/A"
+                )
                 f.write(f"Number of iterations: {num_steps_bim}\n")
                 for eps, eps_info in sorted(bim_results.items()):
                     f.write(f"\nEpsilon = {eps:.4f}\n")
-                    f.write(f"  Ensemble accuracy:                 {eps_info['ensemble_acc']:.2f}%\n")
+                    f.write(
+                        f"  Ensemble accuracy:                 {eps_info['ensemble_acc']:.2f}%\n"
+                    )
                     for i, acc in enumerate(eps_info["model_accs"]):
                         f.write(f"  Model {i+1} accuracy:              {acc:.2f}%\n")
             else:
@@ -552,11 +583,17 @@ class DiversityNESRunner:
             f.write("ADVERSARIAL ATTACK RESULTS (PGD)\n")
             f.write("=" * 60 + "\n")
             if pgd_results:
-                num_steps_pgd = list(pgd_results.values())[0].get("num_steps", "N/A") if pgd_results else "N/A"
+                num_steps_pgd = (
+                    list(pgd_results.values())[0].get("num_steps", "N/A")
+                    if pgd_results
+                    else "N/A"
+                )
                 f.write(f"Number of iterations: {num_steps_pgd}\n")
                 for eps, eps_info in sorted(pgd_results.items()):
                     f.write(f"\nEpsilon = {eps:.4f}\n")
-                    f.write(f"  Ensemble accuracy:                 {eps_info['ensemble_acc']:.2f}%\n")
+                    f.write(
+                        f"  Ensemble accuracy:                 {eps_info['ensemble_acc']:.2f}%\n"
+                    )
                     for i, acc in enumerate(eps_info["model_accs"]):
                         f.write(f"  Model {i+1} accuracy:              {acc:.2f}%\n")
             else:
@@ -566,24 +603,38 @@ class DiversityNESRunner:
             f.write("\n" + "=" * 60 + "\n")
             f.write("ADDITIONAL INFORMATION\n")
             f.write("=" * 60 + "\n")
-            f.write(f"Ensemble improvement over avg model: {ensemble_acc - avg_model_acc:.2f}%\n")
+            f.write(
+                f"Ensemble improvement over avg model: {ensemble_acc - avg_model_acc:.2f}%\n"
+            )
             f.write(f"NLL improvement (Oracle - Ensemble): {oracle_nll - nll:.4f}\n")
-            
+
             # Робастность к атакам
             if fgsm_results:
                 max_eps_fgsm = max(fgsm_results.keys())
-                fgsm_degradation = ensemble_acc - fgsm_results[max_eps_fgsm]['ensemble_acc']
-                f.write(f"FGSM accuracy drop (eps={max_eps_fgsm:.4f}):    {fgsm_degradation:.2f}%\n")
-            
+                fgsm_degradation = (
+                    ensemble_acc - fgsm_results[max_eps_fgsm]["ensemble_acc"]
+                )
+                f.write(
+                    f"FGSM accuracy drop (eps={max_eps_fgsm:.4f}):    {fgsm_degradation:.2f}%\n"
+                )
+
             if bim_results:
                 max_eps_bim = max(bim_results.keys())
-                bim_degradation = ensemble_acc - bim_results[max_eps_bim]['ensemble_acc']
-                f.write(f"BIM accuracy drop (eps={max_eps_bim:.4f}):     {bim_degradation:.2f}%\n")
-            
+                bim_degradation = (
+                    ensemble_acc - bim_results[max_eps_bim]["ensemble_acc"]
+                )
+                f.write(
+                    f"BIM accuracy drop (eps={max_eps_bim:.4f}):     {bim_degradation:.2f}%\n"
+                )
+
             if pgd_results:
                 max_eps_pgd = max(pgd_results.keys())
-                pgd_degradation = ensemble_acc - pgd_results[max_eps_pgd]['ensemble_acc']
-                f.write(f"PGD accuracy drop (eps={max_eps_pgd:.4f}):     {pgd_degradation:.2f}%\n")
+                pgd_degradation = (
+                    ensemble_acc - pgd_results[max_eps_pgd]["ensemble_acc"]
+                )
+                f.write(
+                    f"PGD accuracy drop (eps={max_eps_pgd:.4f}):     {pgd_degradation:.2f}%\n"
+                )
 
         print(f"\nResults saved to: {out_file}")
         return ensemble_acc, model_accs, ece
@@ -594,14 +645,14 @@ class DiversityNESRunner:
         while (Path(path) / f"{file_name}_{experiment_num}.txt").exists():
             experiment_num += 1
         return experiment_num
-    
+
     def _get_free_file_index_dir(self, path: str, dir_name: str) -> int:
         """Находит свободный индекс для имени папки."""
         experiment_num = 1
         while (Path(path) / f"{dir_name}_{experiment_num}").exists():
             experiment_num += 1
         return experiment_num
-    
+
     def get_latest_index_from_dir(self, base_path: Optional[Path] = None) -> int:
         """Находит последний индекс в директориях models_json_*."""
         if base_path is None:
@@ -634,50 +685,44 @@ class DiversityNESRunner:
     ):
         """Целевой процесс для параллельного обучения."""
         os.environ["CUDA_VISIBLE_DEVICES"] = str(physical_gpu_id)
+        max_retries = 99999
+        retry_delay = 300
+        for attempt in range(max_retries + 1):
+            try:
+                if torch.cuda.is_available():
+                    torch.cuda.set_device(0)
+                    torch.cuda.empty_cache()
 
-        try:
-            if torch.cuda.is_available():
-                torch.cuda.set_device(0)
-                torch.cuda.empty_cache()
-            torch.set_float32_matmul_precision("high")
+                torch.set_float32_matmul_precision("high")
+                device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-            device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-            runner = DiversityNESRunner(
-                config, DatasetsInfo.get(config.dataset_name.lower())
-            )
-            train_loader, valid_loader, test_loader = runner.get_data_loaders()
+                runner = DiversityNESRunner(config, DatasetsInfo.get(config.dataset_name.lower()))
+                train_loader, valid_loader, test_loader = runner.get_data_loaders()
 
-            model = runner.train_model(architecture, train_loader, None, model_id)
-            model = model.to(device)
-            max_retries = 99999
-            retry_delay = 300
+                model = runner.train_model(architecture, train_loader, None, model_id)
+                model = model.to(device)
 
-            for attempt in range(max_retries + 1):
-                try:
-                    torch.save(model.state_dict(), pth_path / f"model_{model_id}.pth")
-                    print(f"Model {model_id} saved to {pth_path}")
+                torch.save(model.state_dict(), pth_path / f"model_{model_id}.pth")
+                print(f"[GPU {physical_gpu_id}] ✅ Model {model_id} saved to {pth_path}")
 
-                    eval_loader = test_loader if config.evaluate_ensemble_flag else valid_loader
-                    runner.evaluate_and_save_results(
-                        model, architecture, eval_loader, str(archs_path), model_id=model_id
-                    )
-                    break
-                except Exception as e:
-                    print(f"Attempt {attempt + 1} failed with error: {e}")
+                eval_loader = test_loader if config.evaluate_ensemble_flag else valid_loader
+                runner.evaluate_and_save_results(
+                    model, architecture, eval_loader, str(archs_path), model_id=model_id
+                )
+                break
 
-                    if attempt < max_retries:
-                        print(f"Retrying in {retry_delay} seconds...")
-                        time.sleep(retry_delay)
-                    else:
-                        print(f"Failed to save and evaluate model {model_id} after {max_retries + 1} attempts.")
-                        raise
+            except Exception as e:
+                print(f"[GPU {physical_gpu_id}] Attempt {attempt+1}/{max_retries} failed: {e}")
+                if attempt < max_retries:
+                    print(f"Retrying in {retry_delay} sec...")
+                    time.sleep(retry_delay)
+                else:
+                    print(f"❌ Model {model_id} failed after {max_retries} attempts.")
+                    raise
+            finally:
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
 
-        except Exception as e:
-            print(f"Error in process {model_id}: {e}")
-            raise
-        finally:
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
 
     def fill_models_list(self, archs_path, pth_path) -> None:
         """Загружает обученные модели из .pth и .json."""
@@ -834,7 +879,7 @@ class DiversityNESRunner:
                     n_ece_bins=self.config.n_ece_bins,
                     developer_mode=self.config.developer_mode,
                     mean=self.MEAN,
-                    std=self.STD
+                    std=self.STD,
                 )
                 self.finalize_ensemble_evaluation(stats, f"ensemble_results_{index}")
             else:
@@ -871,7 +916,6 @@ class DiversityNESRunner:
                 eval_loader = test_loader
             else:
                 eval_loader = valid_loader
-                
 
             # Загружаем модель
             with model_context(architecture):
@@ -906,7 +950,6 @@ class DiversityNESRunner:
         root_dir = Path(self.config.best_models_save_path)
         json_dir = root_dir / f"trained_models_archs_{index}"
         pth_dir = root_dir / f"trained_models_pth_{index}"
-
 
         arch_dicts = load_json_from_directory(json_dir)
         self.models = []
@@ -957,16 +1000,16 @@ class DiversityNESRunner:
             pass
 
         print("Loading architectures...")
-        index_2_json_dir = {} 
+        index_2_json_dir = {}
         latest_index = self.get_latest_index_from_dir()
         assert latest_index > 0, "No architectures found!"
-        
+
         for cur_index in range(1, latest_index + 1):
             models_json_dir = (
                 Path(self.config.best_models_save_path) / f"models_json_{cur_index}"
             )
             index_2_json_dir[cur_index] = models_json_dir
-        
+
         archs_list = []  # its array of tuple (json_dir_index, arch_dict)
         index_2_n_archs = {}
         for cur_index in index_2_json_dir.keys():
@@ -980,11 +1023,11 @@ class DiversityNESRunner:
 
         n_models = len(archs_list)
         available_gpus = self._get_available_gpus()
-        
+
         if not available_gpus:
             print("No GPUs available!")
             return
-            
+
         n_gpus = len(available_gpus)
         max_per_gpu = self.config.max_per_gpu
         total_processes = n_models
@@ -994,7 +1037,7 @@ class DiversityNESRunner:
 
         archs_and_pth_path_list = []
         output_path = Path(self.config.output_path)
-        
+
         for cur_index in index_2_json_dir.keys():
             archs_path = output_path / f"trained_models_archs_{cur_index}"
             pth_path = output_path / f"trained_models_pth_{cur_index}"
@@ -1003,7 +1046,7 @@ class DiversityNESRunner:
             pth_path.mkdir(parents=True, exist_ok=True)
 
         processes = []
-        
+
         for idx, (cur_index, arch) in enumerate(archs_list):
             gpu_idx = (idx // max_per_gpu) % n_gpus
             physical_gpu_id = available_gpus[gpu_idx]
@@ -1058,7 +1101,7 @@ class DiversityNESRunner:
                         n_ece_bins=self.config.n_ece_bins,
                         developer_mode=self.config.developer_mode,
                         mean=self.MEAN,
-                        std=self.STD
+                        std=self.STD,
                     )
                     self.finalize_ensemble_evaluation(
                         stats, f"ensemble_results_{cur_index}"
