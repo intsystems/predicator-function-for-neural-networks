@@ -28,7 +28,13 @@ from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 import collections
 
-from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
+from sklearn.metrics import (
+    r2_score,
+    mean_absolute_error,
+    mean_squared_error,
+    roc_auc_score,
+)
+from scipy.stats import spearmanr
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from Graph import Graph
@@ -746,35 +752,41 @@ def save_accuracy_predictions(
     true_accs = np.array(true_accs)
     pred_accs = np.array(pred_accs)
 
-    # === Вычисляем метрики ДО сортировки ===
+    # === Метрики ДО сортировки ===
     r2 = r2_score(true_accs, pred_accs)
     mae = mean_absolute_error(true_accs, pred_accs)
     rmse = np.sqrt(mean_squared_error(true_accs, pred_accs))
 
-    # === Сортируем по убыванию true_acc ===
-    sorted_indices = np.argsort(true_accs)[::-1]  # [::-1] — это и есть убывание
+    # === Доп. метрики: Rank-AUC / Spearman ===
+    # Spearman оценивает ранговую корреляцию, отлично подходит для подобных задач
+    spearman_corr, _ = spearmanr(true_accs, pred_accs)
+
+    # === Сортировка по true_acc (убывание) ===
+    sorted_indices = np.argsort(true_accs)[::-1]
     true_accs_sorted = true_accs[sorted_indices]
     pred_accs_sorted = pred_accs[sorted_indices]
 
-    # === Сохраняем: сначала метрики, потом отсортированные данные ===
+    # === Сохраняем ===
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
-
     with open(file_path, "w", encoding="utf-8") as f:
-        f.write(f"# Accuracy prediction quality metrics\n")
+        f.write("# Accuracy prediction metrics\n")
         f.write(f"R2: {r2:.4f}\n")
         f.write(f"MAE: {mae:.4f}\n")
         f.write(f"RMSE: {rmse:.4f}\n")
-        f.write(f"# Number of samples: {len(true_accs)}\n")
-        f.write(f"\n# true_acc pred_acc (sorted by true_acc descending)\n")
+        f.write(f"SpearmanR: {spearman_corr:.4f}\n")
+        f.write(f"# Number of samples: {len(true_accs)}\n\n")
+        f.write("# true_acc pred_acc (sorted by true_acc desc)\n")
         for true, pred in zip(true_accs_sorted, pred_accs_sorted):
             f.write(f"{true:.4f} {pred:.4f}\n")
 
     print(f"✅ Saved sorted predictions and metrics to {file_path}")
-    print(f"   R² = {r2:.4f}, MAE = {mae:.4f}, RMSE = {rmse:.4f}")
-    print(f"   Entries sorted by true_acc (descending)")
+    print(
+        f"   R²={r2:.4f}, MAE={mae:.4f}, RMSE={rmse:.4f}, "
+        f"Spearman={spearman_corr:.4f}"
+    )
+    print("   Entries sorted by true_acc (descending)")
 
     return true_accs_sorted, pred_accs_sorted
-
 
 def plot_train_valid_losses(
     train_losses, valid_losses, file_name="train_valid_losses.png"
