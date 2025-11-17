@@ -216,7 +216,7 @@ class InferSurrogate:
         
         
         print(
-            f"Adding model 1/{n_select} with best accuracy = {ensemble_accs[0].item() / 100:.2f}"
+            f"Adding model 1/{n_select} with best accuracy = {ensemble_accs[0].item() / 100:.3f}"
         )
         
         candidate_accs = torch.cat([candidate_accs[:best_first_idx], candidate_accs[best_first_idx+1:]])
@@ -235,7 +235,7 @@ class InferSurrogate:
             print(
                 f"Adding model {len(ensemble_archs) + 1}/{n_select} with "
                 f"score = {scores[best_idx].item():.2f}, "
-                f"accuracy = {candidate_accs[best_idx].item() / 100:.2f}, "
+                f"accuracy = {candidate_accs[best_idx].item() / 100:.3f}, "
                 f"mean_dist = {mean_dists[best_idx].item():.2f}"
             )
             

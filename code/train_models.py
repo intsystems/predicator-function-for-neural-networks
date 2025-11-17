@@ -685,43 +685,30 @@ class DiversityNESRunner:
     ):
         """Целевой процесс для параллельного обучения."""
         os.environ["CUDA_VISIBLE_DEVICES"] = str(physical_gpu_id)
-        max_retries = 99999
-        retry_delay = 300
-        for attempt in range(max_retries + 1):
-            try:
-                if torch.cuda.is_available():
-                    torch.cuda.set_device(0)
-                    torch.cuda.empty_cache()
 
-                torch.set_float32_matmul_precision("high")
-                device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        if torch.cuda.is_available():
+            torch.cuda.set_device(0)
+            torch.cuda.empty_cache()
 
-                runner = DiversityNESRunner(config, DatasetsInfo.get(config.dataset_name.lower()))
-                train_loader, valid_loader, test_loader = runner.get_data_loaders()
+        torch.set_float32_matmul_precision("high")
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-                model = runner.train_model(architecture, train_loader, None, model_id)
-                model = model.to(device)
+        runner = DiversityNESRunner(config, DatasetsInfo.get(config.dataset_name.lower()))
+        train_loader, valid_loader, test_loader = runner.get_data_loaders()
 
-                torch.save(model.state_dict(), pth_path / f"model_{model_id}.pth")
-                print(f"[GPU {physical_gpu_id}] ✅ Model {model_id} saved to {pth_path}")
+        model = runner.train_model(architecture, train_loader, None, model_id)
+        model = model.to(device)
 
-                eval_loader = test_loader if config.evaluate_ensemble_flag else valid_loader
-                runner.evaluate_and_save_results(
-                    model, architecture, eval_loader, str(archs_path), model_id=model_id
-                )
-                break
+        torch.save(model.state_dict(), pth_path / f"model_{model_id}.pth")
+        print(f"[GPU {physical_gpu_id}] ✅ Model {model_id} saved to {pth_path}")
 
-            except Exception as e:
-                print(f"[GPU {physical_gpu_id}] Attempt {attempt+1}/{max_retries} failed: {e}")
-                if attempt < max_retries:
-                    print(f"Retrying in {retry_delay} sec...")
-                    time.sleep(retry_delay)
-                else:
-                    print(f"❌ Model {model_id} failed after {max_retries} attempts.")
-                    raise
-            finally:
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+        eval_loader = test_loader if config.evaluate_ensemble_flag else valid_loader
+        runner.evaluate_and_save_results(
+            model, architecture, eval_loader, str(archs_path), model_id=model_id
+        )
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
 
     def fill_models_list(self, archs_path, pth_path) -> None:
