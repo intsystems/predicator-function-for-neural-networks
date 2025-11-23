@@ -85,7 +85,6 @@ class DartsClassificationModule(ClassificationModule):
 
         self.log('train_loss', loss, prog_bar=True, on_epoch=True, on_step=False, sync_dist=True)
 
-        # Явно считаем и логируем accuracy
         preds = y_hat.argmax(dim=1)
         acc = (preds == y).float().mean()
         self.log('train_acc', acc, prog_bar=True, on_epoch=True, on_step=False, sync_dist=True)
@@ -104,7 +103,6 @@ class DartsClassificationModule(ClassificationModule):
         loss = self.criterion(y_hat, y)
         self.log('val_loss', loss, prog_bar=True, on_epoch=True, on_step=False, sync_dist=True)
 
-        # Явно считаем и логируем accuracy
         preds = y_hat.argmax(dim=1)
         acc = (preds == y).float().mean()
         self.log('val_acc', acc, prog_bar=True, on_epoch=True, on_step=False, sync_dist=True)

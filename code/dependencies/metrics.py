@@ -4,6 +4,63 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 import itertools
 from torch.nn import functional as F
+from pytorch_lightning.callbacks import Callback
+
+class MetricsCallback(Callback):
+    def __init__(self):
+        super().__init__()
+        self.train_losses = []
+        self.val_losses = []
+        self.train_accs = []
+        self.val_accs = []
+        self.lrs = []
+        self.epochs = []
+        self._has_data = False
+
+    def on_train_epoch_end(self, trainer, pl_module):
+        """Собираем ТОЛЬКО обучающие метрики и LR"""
+        current_epoch = trainer.current_epoch
+        metrics = trainer.callback_metrics
+        
+        epoch_data = {}
+        
+        if 'train_loss' in metrics:
+            self.train_losses.append(metrics['train_loss'].item())
+            epoch_data['train_loss'] = metrics['train_loss'].item()
+        if 'train_acc' in metrics:
+            self.train_accs.append(metrics['train_acc'].item())
+            epoch_data['train_acc'] = metrics['train_acc'].item()
+        
+        try:
+            lr = trainer.optimizers[0].param_groups[0]['lr']
+            self.lrs.append(lr)
+            epoch_data['lr'] = lr
+        except Exception as e:
+            if self.lrs:
+                self.lrs.append(self.lrs[-1])
+            else:
+                self.lrs.append(0.0)
+        
+        self.epochs.append(current_epoch)
+        self._has_data = True
+        
+    def on_validation_epoch_end(self, trainer, pl_module):
+        """Собираем ТОЛЬКО валидационные метрики"""
+        metrics = trainer.callback_metrics
+        current_epoch = trainer.current_epoch
+        
+        epoch_data = {}
+        
+        if 'val_loss' in metrics:
+            if len(self.val_losses) < len(self.epochs):
+                self.val_losses.append(metrics['val_loss'].item())
+                epoch_data['val_loss'] = metrics['val_loss'].item()
+        if 'val_acc' in metrics:
+            if len(self.val_accs) < len(self.epochs):
+                self.val_accs.append(metrics['val_acc'].item())
+                epoch_data['val_acc'] = metrics['val_acc'].item()
+    
+
 
 
 def collect_ensemble_stats(

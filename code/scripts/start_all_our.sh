@@ -13,6 +13,8 @@ python inference_surrogate.py --hyperparameters_json "$CONFIG"
 
 # python inference_surrogate.py --hyperparameters_json "$CONFIG"
 
+# python inference_surrogate.py --hyperparameters_json "$CONFIG"
+
 # python train_models.py --hyperparameters_json "$CONFIG"
 
 echo "=== Все этапы успешно завершены ==="
