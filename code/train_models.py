@@ -349,59 +349,58 @@ class DiversityNESRunner:
             self._save_error_info(model_id, str(e))
             return None
 
-
     def _save_training_plot(self, metrics_callback, model_id: int):
         if not metrics_callback._has_data or not metrics_callback.epochs:
             print(f"⚠️ Model {model_id}: Insufficient data for plotting. Skipping.")
             return False
-        
+
         n_epochs = len(metrics_callback.epochs)
-        
         log_dir = "logs/train_plots"
         os.makedirs(log_dir, exist_ok=True)
-        
+
         try:
             fig, axes = plt.subplots(2, 2, figsize=(15, 10))
             fig.suptitle(f'Training Metrics for Model {model_id} (Total Epochs: {n_epochs})', fontsize=16)
-            
-            # 1. Losses - строим всегда, даже если нет валидации
-            axes[0, 0].plot(metrics_callback.epochs, metrics_callback.train_losses, 'b-o', label='Train Loss', linewidth=2, markersize=6)
+
+            # 1. Losses
+            axes[0, 0].plot(metrics_callback.epochs, metrics_callback.train_losses, 'b-', label='Train Loss', linewidth=2)
             if metrics_callback.val_losses:
                 val_losses = metrics_callback.val_losses[:n_epochs] + [metrics_callback.val_losses[-1]] * max(0, n_epochs - len(metrics_callback.val_losses))
-                axes[0, 0].plot(metrics_callback.epochs, val_losses, 'r-s', label='Validation Loss', linewidth=2, markersize=6)
+                axes[0, 0].plot(metrics_callback.epochs, val_losses, 'r-', label='Validation Loss', linewidth=2)
             axes[0, 0].set_title('Training and Validation Loss')
             axes[0, 0].set_xlabel('Epoch')
             axes[0, 0].set_ylabel('Loss')
-            axes[0, 0].legend()
+            axes[0, 0].legend(loc='best')
             axes[0, 0].grid(True, linestyle='--', alpha=0.7)
-            
-            # 2. Accuracies - строим всегда
-            axes[0, 1].plot(metrics_callback.epochs, metrics_callback.train_accs, 'g-o', label='Train Accuracy', linewidth=2, markersize=6)
+
+            # 2. Accuracies
+            axes[0, 1].plot(metrics_callback.epochs, metrics_callback.train_accs, 'g-', label='Train Accuracy', linewidth=2)
             if metrics_callback.val_accs:
                 val_accs = metrics_callback.val_accs[:n_epochs] + [metrics_callback.val_accs[-1]] * max(0, n_epochs - len(metrics_callback.val_accs))
-                axes[0, 1].plot(metrics_callback.epochs, val_accs, 'm-s', label='Validation Accuracy', linewidth=2, markersize=6)
+                axes[0, 1].plot(metrics_callback.epochs, val_accs, 'm-', label='Validation Accuracy', linewidth=2)
             axes[0, 1].set_title('Training and Validation Accuracy')
             axes[0, 1].set_xlabel('Epoch')
             axes[0, 1].set_ylabel('Accuracy')
             axes[0, 1].set_ylim(0, max(1.0, max(metrics_callback.train_accs + metrics_callback.val_accs[:n_epochs] + [0.1]) * 1.1))
-            axes[0, 1].legend()
+            axes[0, 1].legend(loc='best')
             axes[0, 1].grid(True, linestyle='--', alpha=0.7)
-            
+
             # 3. Learning Rate
             if metrics_callback.lrs:
                 lrs = metrics_callback.lrs[:n_epochs] + [metrics_callback.lrs[-1]] * max(0, n_epochs - len(metrics_callback.lrs))
-                axes[1, 0].plot(metrics_callback.epochs, lrs, 'c-d', label='Learning Rate', linewidth=2, markersize=6)
+                axes[1, 0].plot(metrics_callback.epochs, lrs, 'c-', label='Learning Rate', linewidth=2)
                 axes[1, 0].set_title('Learning Rate Schedule')
                 axes[1, 0].set_xlabel('Epoch')
                 axes[1, 0].set_ylabel('LR')
                 if max(lrs) > min(lrs) * 10:
                     axes[1, 0].set_yscale('log')
-                axes[1, 0].legend()
+                axes[1, 0].legend(loc='best')
                 axes[1, 0].grid(True, linestyle='--', alpha=0.7)
             else:
                 axes[1, 0].text(0.5, 0.5, 'No LR data available', ha='center', va='center')
                 axes[1, 0].set_title('Learning Rate')
-            
+
+            # 4. Summary Table
             metrics_summary = [
                 ['Metric', 'Final Value'],
                 ['Train Loss', f"{metrics_callback.train_losses[-1]:.4f}" if metrics_callback.train_losses else "N/A"],
@@ -410,7 +409,7 @@ class DiversityNESRunner:
                 ['Val Acc', f"{metrics_callback.val_accs[-1]:.4f}" if metrics_callback.val_accs else "N/A"],
                 ['Final LR', f"{metrics_callback.lrs[-1]:.6f}" if metrics_callback.lrs else "N/A"]
             ]
-            
+
             axes[1, 1].axis('tight')
             axes[1, 1].axis('off')
             table = axes[1, 1].table(
@@ -423,16 +422,16 @@ class DiversityNESRunner:
             table.set_fontsize(10)
             table.scale(1.2, 1.5)
             axes[1, 1].set_title('Final Metrics Summary', fontsize=12)
-            
+
             plt.tight_layout(rect=[0, 0, 1, 0.95])
-            
+
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             plot_path = os.path.join(log_dir, f'model_{model_id}_training_{timestamp}.png')
-            
+
             plt.savefig(plot_path, dpi=300, bbox_inches='tight')
             plt.close(fig)
             return True
-            
+
         except Exception as e:
             print(f"❌ Error generating plot: {str(e)}")
             raw_path = os.path.join(log_dir, f'model_{model_id}_raw_metrics_{datetime.now().strftime("%Y%m%d_%H%M%S")}.npz')
