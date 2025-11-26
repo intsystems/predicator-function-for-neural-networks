@@ -62,7 +62,7 @@
     "evaluate_ensemble_flag": true,
     "n_models_to_evaluate": 2000,
     "output_path": "output/",
-    "width": 16,
+    "n_ece_bins": 16,
     "num_cells": 3,
-    "n_ece_bins": 16
+    "width": 16
 }

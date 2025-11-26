@@ -73,11 +73,10 @@ class GATBlock(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.act = activation if activation is not None else nn.ELU()
 
-        # === Исправление: нормализация зависит от режима ===
         if pre_norm:
             # Pre-Norm: нормализуем вход → используем in_dim
             self.norm_pre = GraphNorm(in_dim)
-            self.norm_post = nn.Identity()  # не нужна после
+            self.norm_post = nn.Identity()
         else:
             # Post-Norm: нормализуем выход → используем out_dim
             self.norm_pre = nn.Identity()
