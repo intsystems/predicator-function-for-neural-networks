@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 
 export CUDA_VISIBLE_DEVICES="7"
 
-CONFIG="surrogate_hp_CIFAR100.json"
+CONFIG="surrogate_hp_fashionmnist.json"
 
 echo
 echo "🚀 Начинаем выполнение скрипта train_models.py"
