@@ -34,7 +34,7 @@ class DartsArchitectureSelector(DiversityNESRunner):
         )
 
         accelerator = "gpu" if torch.cuda.is_available() else "cpu"
-        devices_arg = [7,6,5,3]
+        devices_arg = [4,5,6,7]
 
         print(f"🔍 Developer mode from config: {self.config.developer_mode}")
         print(f"🔍 Train batches: {len(train_loader)}")
