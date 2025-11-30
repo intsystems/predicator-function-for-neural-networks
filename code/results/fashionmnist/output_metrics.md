@@ -1,15 +1,67 @@
+# Результаты оценки ансамбля
+
+## Основные метрики
+
 | Метрика | Среднее ± Ст.откл. |
 |---|---|
-| Ensemble ECE | 0.12 ± 0.00 |
-| Ensemble FGSM acc @ 0.000 | 95.22 ± 0.12 |
-| Ensemble FGSM acc @ 0.050 | 55.06 ± 4.12 |
-| Ensemble FGSM acc @ 0.100 | 34.38 ± 5.84 |
-| Ensemble FGSM acc @ 0.150 | 25.87 ± 5.28 |
-| Ensemble FGSM acc @ 0.200 | 21.61 ± 4.70 |
-| Ensemble FGSM acc @ 0.250 | 19.04 ± 4.19 |
-| Ensemble FGSM acc @ 0.300 | 17.24 ± 3.84 |
-| Ensemble NLL | 0.26 ± 0.00 |
-| Ensemble Top-1 Accuracy | 95.22% ± 0.1175 |
-| Normalized Predictive Disagreement | 2.47 ± 0.25 |
-| Number of models | 3.00 ± 0.00 |
-| Oracle Ensemble NLL | 0.20 ± 0.01 |
+| Average Model Top-1 Accuracy | 94.71% ± 0.11 |
+| Ensemble Top-1 Accuracy | 95.29% ± 0.10 |
+| Ensemble improvement over avg model | 0.58% ± 0.09 |
+| NLL improvement (Oracle - Ensemble) | -0.06% ± 0.01 |
+| Number of models | 3 |
+| Total samples | 10000 |
+
+## Метрики калибровки
+
+| Метрика | Среднее ± Ст.откл. |
+|---|---|
+| Brier Score | 0.0889 ± 0.0009 |
+| Expected Calibration Error (ECE) | 0.1238 ± 0.0021 |
+| Negative Log-Likelihood (NLL) | 0.2627 ± 0.0028 |
+| Oracle NLL | 0.1991 ± 0.0095 |
+
+## Метрики разнообразия
+
+| Метрика | Среднее ± Ст.откл. |
+|---|---|
+| Ambiguity (Ensemble Benefit) | 0.0058 ± 0.0009 |
+| Normalized Pred. Disagreement | 0.0652 ± 0.0081 |
+| Predictive Disagreement | 0.1304 ± 0.0163 |
+
+## FGSM атаки
+
+| Epsilon | Accuracy (среднее ± ст.откл.) |
+|---|---|
+| 0.0000 | 95.29% ± 0.10 |
+| 0.0200 | 72.59% ± 2.32 |
+| 0.0400 | 61.51% ± 3.60 |
+| 0.0800 | 41.52% ± 4.14 |
+| 0.1000 | 34.52% ± 3.97 |
+
+## BIM атаки
+
+| Epsilon | Accuracy (среднее ± ст.откл.) |
+|---|---|
+| 0.0000 | 95.31% ± 0.12 |
+| 0.0200 | 52.69% ± 2.68 |
+| 0.0400 | 33.43% ± 6.31 |
+| 0.0800 | 6.64% ± 3.85 |
+| 0.1000 | 2.72% ± 1.71 |
+
+## PGD атаки
+
+| Epsilon | Accuracy (среднее ± ст.откл.) |
+|---|---|
+| 0.0000 | 95.31% ± 0.12 |
+| 0.0200 | 50.50% ± 2.05 |
+| 0.0400 | 12.45% ± 4.70 |
+| 0.0800 | 0.17% ± 0.14 |
+| 0.1000 | 0.03% ± 0.04 |
+
+## Падение точности при атаках
+
+| Тип атаки | Epsilon | Падение точности (среднее ± ст.откл.) |
+|---|---|---|
+| BIM | 0.1000 | 92.56% ± 1.64 |
+| FGSM | 0.1000 | 60.76% ± 3.94 |
+| PGD | 0.1000 | 95.26% ± 0.11 |

@@ -1,56 +1,138 @@
-====================================
-Ensemble Evaluation Results
-====================================
-Ensemble Top-1 Accuracy:             95.24%
-Ensemble ECE:                        0.1199
-Ensemble NLL:                        0.2575
-Oracle Ensemble NLL:                 0.1811
-Normalized Predictive Disagreement:   2.9108
-Number of models:                    3
-Model 1 Top-1 Accuracy:          95.10%
-Model 2 Top-1 Accuracy:          94.78%
-Model 3 Top-1 Accuracy:          93.69%
+============================================================
+ENSEMBLE EVALUATION RESULTS
+============================================================
 
---- Adversarial Attack Results (FGSM) ---
+--- Basic Metrics ---
+Number of models:                    3
+Total samples:                       10000
+Ensemble Top-1 Accuracy:             95.24%
+Average Model Top-1 Accuracy:        94.52%
+
+--- Individual Model Accuracies ---
+  Model 1 Top-1 Accuracy:        94.78%
+  Model 2 Top-1 Accuracy:        95.10%
+  Model 3 Top-1 Accuracy:        93.69%
+
+--- Calibration Metrics ---
+Expected Calibration Error (ECE):    0.1199
+Negative Log-Likelihood (NLL):       0.2575
+Oracle NLL:                          0.1811
+Brier Score:                         0.0885
+
+--- Diversity Metrics ---
+Ambiguity (Ensemble Benefit):        0.0072
+Predictive Disagreement:             0.1594
+Normalized Pred. Disagreement:       0.0797
+
+============================================================
+ADVERSARIAL ATTACK RESULTS (FGSM)
+============================================================
+
 Epsilon = 0.0000
-    Ensemble accuracy:               95.24%
-    Model 1 accuracy:            95.10%
-    Model 2 accuracy:            94.78%
-    Model 3 accuracy:            93.69%
-------------------------------------
-Epsilon = 0.0500
-    Ensemble accuracy:               53.40%
-    Model 1 accuracy:            52.73%
-    Model 2 accuracy:            50.36%
-    Model 3 accuracy:            48.43%
-------------------------------------
+  Ensemble accuracy:                 95.24%
+  Model 1 accuracy:              94.78%
+  Model 2 accuracy:              95.10%
+  Model 3 accuracy:              93.69%
+
+Epsilon = 0.0200
+  Ensemble accuracy:                 68.49%
+  Model 1 accuracy:              69.10%
+  Model 2 accuracy:              71.24%
+  Model 3 accuracy:              60.25%
+
+Epsilon = 0.0400
+  Ensemble accuracy:                 57.07%
+  Model 1 accuracy:              54.23%
+  Model 2 accuracy:              57.73%
+  Model 3 accuracy:              50.55%
+
+Epsilon = 0.0800
+  Ensemble accuracy:                 43.15%
+  Model 1 accuracy:              40.67%
+  Model 2 accuracy:              39.42%
+  Model 3 accuracy:              40.08%
+
 Epsilon = 0.1000
-    Ensemble accuracy:               37.12%
-    Model 1 accuracy:            34.22%
-    Model 2 accuracy:            35.05%
-    Model 3 accuracy:            36.19%
-------------------------------------
-Epsilon = 0.1500
-    Ensemble accuracy:               29.28%
-    Model 1 accuracy:            28.58%
-    Model 2 accuracy:            27.79%
-    Model 3 accuracy:            28.16%
-------------------------------------
-Epsilon = 0.2000
-    Ensemble accuracy:               24.99%
-    Model 1 accuracy:            26.08%
-    Model 2 accuracy:            24.34%
-    Model 3 accuracy:            21.80%
-------------------------------------
-Epsilon = 0.2500
-    Ensemble accuracy:               21.72%
-    Model 1 accuracy:            25.81%
-    Model 2 accuracy:            21.34%
-    Model 3 accuracy:            16.83%
-------------------------------------
-Epsilon = 0.3000
-    Ensemble accuracy:               18.91%
-    Model 1 accuracy:            25.32%
-    Model 2 accuracy:            18.68%
-    Model 3 accuracy:            13.40%
-------------------------------------
+  Ensemble accuracy:                 37.12%
+  Model 1 accuracy:              35.05%
+  Model 2 accuracy:              34.22%
+  Model 3 accuracy:              36.19%
+
+============================================================
+ADVERSARIAL ATTACK RESULTS (BIM)
+============================================================
+Number of iterations: 10
+
+Epsilon = 0.0000
+  Ensemble accuracy:                 95.28%
+  Model 1 accuracy:              94.78%
+  Model 2 accuracy:              95.10%
+  Model 3 accuracy:              93.69%
+
+Epsilon = 0.0200
+  Ensemble accuracy:                 48.09%
+  Model 1 accuracy:              47.99%
+  Model 2 accuracy:              47.98%
+  Model 3 accuracy:              42.93%
+
+Epsilon = 0.0400
+  Ensemble accuracy:                 23.51%
+  Model 1 accuracy:              25.68%
+  Model 2 accuracy:              22.53%
+  Model 3 accuracy:              12.29%
+
+Epsilon = 0.0800
+  Ensemble accuracy:                 0.58%
+  Model 1 accuracy:              2.25%
+  Model 2 accuracy:              1.79%
+  Model 3 accuracy:              0.15%
+
+Epsilon = 0.1000
+  Ensemble accuracy:                 0.11%
+  Model 1 accuracy:              0.36%
+  Model 2 accuracy:              0.63%
+  Model 3 accuracy:              0.01%
+
+============================================================
+ADVERSARIAL ATTACK RESULTS (PGD)
+============================================================
+Number of iterations: 10
+
+Epsilon = 0.0000
+  Ensemble accuracy:                 95.28%
+  Model 1 accuracy:              94.78%
+  Model 2 accuracy:              95.10%
+  Model 3 accuracy:              93.69%
+
+Epsilon = 0.0200
+  Ensemble accuracy:                 47.13%
+  Model 1 accuracy:              44.81%
+  Model 2 accuracy:              46.95%
+  Model 3 accuracy:              40.56%
+
+Epsilon = 0.0400
+  Ensemble accuracy:                 4.86%
+  Model 1 accuracy:              10.01%
+  Model 2 accuracy:              5.96%
+  Model 3 accuracy:              5.04%
+
+Epsilon = 0.0800
+  Ensemble accuracy:                 0.01%
+  Model 1 accuracy:              0.02%
+  Model 2 accuracy:              0.25%
+  Model 3 accuracy:              0.00%
+
+Epsilon = 0.1000
+  Ensemble accuracy:                 0.00%
+  Model 1 accuracy:              0.00%
+  Model 2 accuracy:              0.07%
+  Model 3 accuracy:              0.01%
+
+============================================================
+ADDITIONAL INFORMATION
+============================================================
+Ensemble improvement over avg model: 0.72%
+NLL improvement (Oracle - Ensemble): -0.0763
+FGSM accuracy drop (eps=0.1000):    58.12%
+BIM accuracy drop (eps=0.1000):     95.13%
+PGD accuracy drop (eps=0.1000):     95.24%

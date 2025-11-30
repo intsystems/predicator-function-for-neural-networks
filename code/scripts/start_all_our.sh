@@ -5,13 +5,13 @@ cd "$(dirname "$0")/.."
 
 export CUDA_VISIBLE_DEVICES="5,6,7"
 
-CONFIG="surrogate_hp_CIFAR100.json"
+CONFIG="surrogate_hp_CIFAR10.json"
 
 python inference_surrogate.py --hyperparameters_json "$CONFIG"
 
 python inference_surrogate.py --hyperparameters_json "$CONFIG"
 
-# python inference_surrogate.py --hyperparameters_json "$CONFIG"
+python inference_surrogate.py --hyperparameters_json "$CONFIG"
 
 # python inference_surrogate.py --hyperparameters_json "$CONFIG"
 
