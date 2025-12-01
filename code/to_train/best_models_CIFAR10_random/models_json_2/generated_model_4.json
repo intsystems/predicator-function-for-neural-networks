@@ -1,69 +1,69 @@
 {
     "architecture": {
-        "normal/op_2_0": "max_pool_3x3",
+        "normal/op_2_0": "skip_connect",
         "normal/input_2_0": [
             0
         ],
-        "normal/op_2_1": "avg_pool_3x3",
+        "normal/op_2_1": "dil_conv_5x5",
         "normal/input_2_1": [
             1
         ],
-        "normal/op_3_0": "sep_conv_3x3",
+        "normal/op_3_0": "sep_conv_5x5",
         "normal/input_3_0": [
             2
         ],
-        "normal/op_3_1": "avg_pool_3x3",
+        "normal/op_3_1": "max_pool_3x3",
         "normal/input_3_1": [
             1
         ],
-        "normal/op_4_0": "max_pool_3x3",
+        "normal/op_4_0": "skip_connect",
         "normal/input_4_0": [
+            2
+        ],
+        "normal/op_4_1": "sep_conv_5x5",
+        "normal/input_4_1": [
             3
         ],
-        "normal/op_4_1": "skip_connect",
-        "normal/input_4_1": [
-            1
-        ],
-        "normal/op_5_0": "sep_conv_5x5",
+        "normal/op_5_0": "sep_conv_3x3",
         "normal/input_5_0": [
-            2
+            4
         ],
         "normal/op_5_1": "max_pool_3x3",
         "normal/input_5_1": [
-            0
-        ],
-        "reduce/op_2_0": "dil_conv_3x3",
-        "reduce/input_2_0": [
-            1
-        ],
-        "reduce/op_2_1": "sep_conv_5x5",
-        "reduce/input_2_1": [
-            0
-        ],
-        "reduce/op_3_0": "skip_connect",
-        "reduce/input_3_0": [
             2
         ],
-        "reduce/op_3_1": "dil_conv_3x3",
-        "reduce/input_3_1": [
+        "reduce/op_2_0": "max_pool_3x3",
+        "reduce/input_2_0": [
             0
         ],
-        "reduce/op_4_0": "sep_conv_3x3",
+        "reduce/op_2_1": "avg_pool_3x3",
+        "reduce/input_2_1": [
+            1
+        ],
+        "reduce/op_3_0": "sep_conv_3x3",
+        "reduce/input_3_0": [
+            0
+        ],
+        "reduce/op_3_1": "skip_connect",
+        "reduce/input_3_1": [
+            1
+        ],
+        "reduce/op_4_0": "sep_conv_5x5",
         "reduce/input_4_0": [
-            3
+            0
         ],
-        "reduce/op_4_1": "max_pool_3x3",
+        "reduce/op_4_1": "skip_connect",
         "reduce/input_4_1": [
-            1
+            2
         ],
-        "reduce/op_5_0": "avg_pool_3x3",
+        "reduce/op_5_0": "skip_connect",
         "reduce/input_5_0": [
-            1
-        ],
-        "reduce/op_5_1": "sep_conv_3x3",
-        "reduce/input_5_1": [
             4
+        ],
+        "reduce/op_5_1": "sep_conv_5x5",
+        "reduce/input_5_1": [
+            3
         ]
     },
-    "seed": 303767465
+    "seed": 243174922
 }
