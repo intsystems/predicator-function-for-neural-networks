@@ -34,7 +34,7 @@
 
     "surrogate_inference_path": "surrogate_models/",
 
-    "use_pretrained_models_for_ensemble": true,
+    "use_pretrained_models_for_ensemble": false,
     "n_ensemble_models": 3,
     "n_models_in_pool": 4096,
     "n_models_to_generate": 10,
@@ -47,8 +47,8 @@
     "random_choice_out_of_best": true,
     "greedy_choice_out_of_best": false,
 
-    "train_size_final": 0.5,
-    "n_epochs_final": 50,
+    "train_size_final": 1.0,
+    "n_epochs_final": 125,
     "lr_start_final": 0.025,
     "lr_end_final": 1e-3,
     "weight_decay": 3e-4,
