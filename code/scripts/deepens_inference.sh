@@ -2,23 +2,24 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-run_experiments() {
+run_baseline() {
     local CONFIG="$1"
     local DATASET="$2"
 
     echo "=== Running DARTS baseline for $DATASET ==="
-    for i in {1..2}; do
-        python DARTS_baseline.py --hyperparameters_json "$CONFIG"
-    done
-    mv best_models "best_models_${DATASET}_deepens"
+    python DARTS_baseline.py --hyperparameters_json "$CONFIG"
 
-    echo "=== Running inference surrogate for $DATASET ==="
-    for i in {1..2}; do
-        python inference_surrogate.py --hyperparameters_json "$CONFIG"
-    done
-    mv best_models "best_models_${DATASET}_random"
+    local OUTDIR="best_models_${DATASET}_baseline"
+    mkdir -p "$OUTDIR"
+    mv best_models "$OUTDIR"
+    echo "[OK] Saved to $OUTDIR"
 }
 
-run_experiments "surrogate_hp_fashionmnist.json" "fashionmnist"
-run_experiments "surrogate_hp_CIFAR10.json"      "CIFAR10"
-run_experiments "surrogate_hp_CIFAR100.json"     "CIFAR100"
+# ──────────────────────────────────────────────
+# Example usage:
+# run_baseline surrogate_hp_fashionmnist.json fashionmnist
+# run_baseline surrogate_hp_CIFAR10.json      CIFAR10
+# run_baseline surrogate_hp_CIFAR100.json     CIFAR100
+# ──────────────────────────────────────────────
+
+run_baseline "surrogate_hp_fashionmnist.json" "fashionmnist"
