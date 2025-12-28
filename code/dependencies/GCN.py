@@ -24,15 +24,12 @@ from torch_geometric.utils import dropout_edge
 from torch_geometric.nn import GATv2Conv, GraphNorm
 from torch_geometric.nn.aggr import AttentionalAggregation
 
-from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
-import collections
 
 from sklearn.metrics import (
     r2_score,
     mean_absolute_error,
     mean_squared_error,
-    roc_auc_score,
 )
 from scipy.stats import spearmanr
 
@@ -41,13 +38,6 @@ from Graph import Graph
 
 
 class GATBlock(nn.Module):
-    """
-    - Identity residual, если in_dim == out_dim
-    - Поддержка Pre-Norm (до GAT) и Post-Norm (после)
-    - ELU по умолчанию
-    - DropEdge (edge_dropout > 0)
-    """
-
     def __init__(
         self,
         in_dim: int,
@@ -59,7 +49,7 @@ class GATBlock(nn.Module):
         activation: nn.Module = None,
     ):
         super().__init__()
-        assert out_dim % heads == 0, "out_dim должно быть кратно числу голов."
+        assert out_dim % heads == 0, "out_dim must be a multiple of the number of heads."
 
         self.in_dim = in_dim
         self.out_dim = out_dim
@@ -74,11 +64,9 @@ class GATBlock(nn.Module):
         self.act = activation if activation is not None else nn.ELU()
 
         if pre_norm:
-            # Pre-Norm: нормализуем вход → используем in_dim
             self.norm_pre = GraphNorm(in_dim)
             self.norm_post = nn.Identity()
         else:
-            # Post-Norm: нормализуем выход → используем out_dim
             self.norm_pre = nn.Identity()
             self.norm_post = GraphNorm(out_dim)
 
@@ -94,11 +82,9 @@ class GATBlock(nn.Module):
             self.norm_pre.reset_parameters()
 
     def forward(self, x, edge_index, batch):
-        # Edge dropout (только в train)
         if self.training and self.edge_dropout > 0.0:
             edge_index, _ = dropout_edge(edge_index, p=self.edge_dropout, training=True)
 
-        # === Pre-Norm: до GAT, по in_dim ===
         x_for_gat = (
             self.norm_pre(x, batch) if isinstance(self.norm_pre, GraphNorm) else x
         )
@@ -107,7 +93,6 @@ class GATBlock(nn.Module):
         res = self.res_proj(x)
         h = self.act(h + res)
 
-        # === Post-Norm: после, по out_dim ===
         if isinstance(self.norm_post, GraphNorm):
             h = self.norm_post(h, batch)
 
