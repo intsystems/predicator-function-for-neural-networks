@@ -289,7 +289,6 @@ class GAT_ver_2(nn.Module):
             return out
 
 
-# ВАЖНО: функция должна быть в глобальной области, чтобы multiprocessing мог её сериализовать
 def load_single_graph(args: tuple):
     json_path_str, idx, accuracies = args
     try:
@@ -300,7 +299,7 @@ def load_single_graph(args: tuple):
         graph = Graph(model_dict, index=idx)
         adj, _, features = (
             graph.get_adjacency_matrix()
-        )  # предполагаем: adj и features — list или np.array
+        )
 
         adj = np.array(adj)
         features = np.array(features)
@@ -311,7 +310,7 @@ def load_single_graph(args: tuple):
             "idx": idx,
             "x": features.astype(
                 np.float32
-            ).tolist(),  # или .tolist() для JSON-совместимости
+            ).tolist(),
             "edge_index": edge_index,
             "y": float(accuracies[idx]) if accuracies is not None else None,
         }
@@ -536,7 +535,7 @@ def train_model_diversity(
                 best_valid_loss = avg_valid_loss
                 torch.save(model.state_dict(), save_path)
                 print(
-                    f"✅ Best diversity model saved to {save_path} (Valid Loss: {avg_valid_loss:.4f})"
+                    f"Best diversity model saved to {save_path} (Valid Loss: {avg_valid_loss:.4f})"
                 )
 
             lr = scheduler.get_last_lr()[0]
@@ -547,18 +546,18 @@ def train_model_diversity(
 
         # === Loading best model ===
         model.load_state_dict(torch.load(save_path, map_location=device))
-        print(f"✅ Loaded best diversity model from {save_path}")
+        print(f"Loaded best diversity model from {save_path}")
 
     except Exception as e:
         if temp_dir_created and checkpoint_dir and os.path.exists(checkpoint_dir):
             shutil.rmtree(checkpoint_dir, ignore_errors=True)
-            print(f"🧹 Temporary directory '{checkpoint_dir}' removed after error.")
+            print(f"Temporary directory '{checkpoint_dir}' removed after error.")
         raise
 
     finally:
         if temp_dir_created and checkpoint_dir and os.path.exists(checkpoint_dir):
             shutil.rmtree(checkpoint_dir, ignore_errors=True)
-            print(f"🧹 Temporary directory '{checkpoint_dir}' removed.")
+            print(f"Temporary directory '{checkpoint_dir}' removed.")
 
     tmp_train_losses = np.array(train_losses)
     tmp_valid_losses = np.array(valid_losses)
@@ -649,7 +648,7 @@ def train_model_accuracy(
                 best_valid_loss = avg_valid_loss
                 torch.save(model.state_dict(), save_path)
                 print(
-                    f"✅ Best model saved to {save_path} (Valid Loss: {avg_valid_loss * 1e4:.4f})"
+                    f"Best model saved to {save_path} (Valid Loss: {avg_valid_loss * 1e4:.4f})"
                 )
 
             lr = scheduler.get_last_lr()[0]
@@ -659,18 +658,18 @@ def train_model_accuracy(
             )
 
         model.load_state_dict(torch.load(save_path, map_location=device))
-        print(f"✅ Loaded best model from {save_path}")
+        print(f"Loaded best model from {save_path}")
 
     except Exception as e:
         if temp_dir_created and checkpoint_dir and os.path.exists(checkpoint_dir):
             shutil.rmtree(checkpoint_dir, ignore_errors=True)
-            print(f"🧹 Temporary directory '{checkpoint_dir}' removed after error.")
+            print(f"Temporary directory '{checkpoint_dir}' removed after error.")
         raise
 
     finally:
         if temp_dir_created and checkpoint_dir and os.path.exists(checkpoint_dir):
             shutil.rmtree(checkpoint_dir, ignore_errors=True)
-            print(f"🧹 Temporary directory '{checkpoint_dir}' removed.")
+            print(f"Temporary directory '{checkpoint_dir}' removed.")
 
     tmp_train_losses = np.sqrt(np.array(train_losses))
     tmp_valid_losses = np.sqrt(np.array(valid_losses))
@@ -744,7 +743,7 @@ def save_accuracy_predictions(
         for true, pred in zip(true_accs_sorted, pred_accs_sorted):
             f.write(f"{true:.4f} {pred:.4f}\n")
 
-    print(f"✅ Saved sorted predictions and metrics to {file_path}")
+    print(f"Saved sorted predictions and metrics to {file_path}")
     print(
         f"   R^2={r2:.4f}, MAE={mae:.4f}, RMSE={rmse:.4f}, "
         f"Spearman={spearman_corr:.4f}"
