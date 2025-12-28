@@ -1,6 +1,5 @@
 import os
 import json
-import shutil
 import re
 import argparse
 from pathlib import Path
@@ -26,27 +25,25 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
-# Импорты из проекта
 from utils_nni.DartsSpace import DARTS_with_CIFAR100 as DartsSpace
 from dependencies.darts_classification_module import DartsClassificationModule
 from dependencies.train_config import TrainConfig
-from dependencies.data_generator import generate_arch_dicts
 from dependencies.metrics import (
     collect_ensemble_stats,
     calculate_nll,
     calculate_ece,
     calculate_oracle_nll,
     calculate_brier_score,
-    MetricsCallback
+    MetricsCallback,
 )
 
-# === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
+# === AUXILIARY FUNCTIONS ===
 
 
 def load_json_from_directory(directory_path: Path) -> List[dict]:
     """
-    Загружает все JSON-файлы из директории и её поддиректорий.
-    Добавляет поле 'id' из имени файла, если отсутствует.
+    Downloads all JSON files from a directory and its subdirectories.
+    Adds the 'id' field from the file name, if missing.
     """
     if not directory_path.exists():
         raise FileNotFoundError(f"Directory {directory_path} does not exist")
@@ -97,15 +94,15 @@ class Cutout:
 
 
 def duplicate_channel(x: torch.Tensor) -> torch.Tensor:
-    """Дублирует одноканальное изображение в 3 канала."""
+    """Duplicates a single-channel image into 3 channels."""
     return x.repeat(3, 1, 1)
 
 
-# === ИНФОРМАЦИЯ О ДАТАСЕТАХ ===
+# === INFORMATION ABOUT DATASETS ===
 
 
 class DatasetsInfo:
-    """Конфигурация датасетов: трансформации, нормализация, классы."""
+    """Configuration of datasets: transformations, normalization, classes."""
 
     DATASETS = {
         "cifar10": {
@@ -196,7 +193,7 @@ class DatasetsInfo:
 
     @classmethod
     def get(cls, dataset_name: str) -> Dict[str, Any]:
-        """Возвращает конфигурацию датасета."""
+        """Returns the configuration of a dataset."""
         dataset_name = dataset_name.lower()
         if dataset_name not in cls.DATASETS:
             raise ValueError(
@@ -205,7 +202,7 @@ class DatasetsInfo:
         return cls.DATASETS[dataset_name]
 
 
-# === ОСНОВНОЙ КЛАСС ===
+# === MAIN CLASS ===
 
 
 class DiversityNESRunner:
@@ -230,7 +227,7 @@ class DiversityNESRunner:
     def get_data_loaders(
         self, batch_size: Optional[int] = None, seed: Optional[int] = None
     ):
-        """Создаёт загрузчики данных."""
+        """Creates data loaders."""
         bs = batch_size or self.config.batch_size_final
         dataset_cls = self.dataset_cls
 
@@ -271,11 +268,12 @@ class DiversityNESRunner:
 
     @staticmethod
     def _custom_weight_init(module: torch.nn.Module) -> None:
-        """Инициализация весов для линейных и сверточных слоёв."""
+        """Initializing weights for linear and convolutional layers."""
         if isinstance(module, (torch.nn.Linear, torch.nn.Conv2d)):
             torch.nn.init.xavier_uniform_(module.weight)
             if module.bias is not None:
                 torch.nn.init.zeros_(module.bias)
+
     def train_model(
         self,
         architecture: dict,
@@ -283,7 +281,7 @@ class DiversityNESRunner:
         valid_loader,
         model_id: int,
     ) -> Optional[torch.nn.Module]:
-        """Обучает одну модель по архитектуре."""
+        """Trains one model in architecture."""
         seed = self.config.seed + model_id
         random.seed(seed)
         np.random.seed(seed)
@@ -334,14 +332,14 @@ class DiversityNESRunner:
             model = model.to(self.device)
 
             time.sleep(1.0)
-            
+
             if metrics_callback._has_data and len(metrics_callback.epochs) > 0:
                 self._save_training_plot(metrics_callback, model_id)
             else:
                 print(f"⏳ Model {model_id}: Waiting for metrics to be collected...")
-                if hasattr(evaluator, 'trainer') and evaluator.trainer is not None:
+                if hasattr(evaluator, "trainer") and evaluator.trainer is not None:
                     print(f"🔍 Trainer metrics: {evaluator.trainer.callback_metrics}")
-            
+
             return model
 
         except Exception as e:
@@ -360,81 +358,173 @@ class DiversityNESRunner:
 
         try:
             fig, axes = plt.subplots(2, 2, figsize=(15, 10))
-            fig.suptitle(f'Training Metrics for Model {model_id} (Total Epochs: {n_epochs})', fontsize=16)
+            fig.suptitle(
+                f"Training Metrics for Model {model_id} (Total Epochs: {n_epochs})",
+                fontsize=16,
+            )
 
             # 1. Losses
-            axes[0, 0].plot(metrics_callback.epochs, metrics_callback.train_losses, 'b-', label='Train Loss', linewidth=2)
+            axes[0, 0].plot(
+                metrics_callback.epochs,
+                metrics_callback.train_losses,
+                "b-",
+                label="Train Loss",
+                linewidth=2,
+            )
             if metrics_callback.val_losses:
-                val_losses = metrics_callback.val_losses[:n_epochs] + [metrics_callback.val_losses[-1]] * max(0, n_epochs - len(metrics_callback.val_losses))
-                axes[0, 0].plot(metrics_callback.epochs, val_losses, 'r-', label='Validation Loss', linewidth=2)
-            axes[0, 0].set_title('Training and Validation Loss')
-            axes[0, 0].set_xlabel('Epoch')
-            axes[0, 0].set_ylabel('Loss')
-            axes[0, 0].legend(loc='best')
-            axes[0, 0].grid(True, linestyle='--', alpha=0.7)
+                val_losses = metrics_callback.val_losses[:n_epochs] + [
+                    metrics_callback.val_losses[-1]
+                ] * max(0, n_epochs - len(metrics_callback.val_losses))
+                axes[0, 0].plot(
+                    metrics_callback.epochs,
+                    val_losses,
+                    "r-",
+                    label="Validation Loss",
+                    linewidth=2,
+                )
+            axes[0, 0].set_title("Training and Validation Loss")
+            axes[0, 0].set_xlabel("Epoch")
+            axes[0, 0].set_ylabel("Loss")
+            axes[0, 0].legend(loc="best")
+            axes[0, 0].grid(True, linestyle="--", alpha=0.7)
 
             # 2. Accuracies
-            axes[0, 1].plot(metrics_callback.epochs, metrics_callback.train_accs, 'g-', label='Train Accuracy', linewidth=2)
+            axes[0, 1].plot(
+                metrics_callback.epochs,
+                metrics_callback.train_accs,
+                "g-",
+                label="Train Accuracy",
+                linewidth=2,
+            )
             if metrics_callback.val_accs:
-                val_accs = metrics_callback.val_accs[:n_epochs] + [metrics_callback.val_accs[-1]] * max(0, n_epochs - len(metrics_callback.val_accs))
-                axes[0, 1].plot(metrics_callback.epochs, val_accs, 'm-', label='Validation Accuracy', linewidth=2)
-            axes[0, 1].set_title('Training and Validation Accuracy')
-            axes[0, 1].set_xlabel('Epoch')
-            axes[0, 1].set_ylabel('Accuracy')
-            axes[0, 1].set_ylim(0, max(1.0, max(metrics_callback.train_accs + metrics_callback.val_accs[:n_epochs] + [0.1]) * 1.1))
-            axes[0, 1].legend(loc='best')
-            axes[0, 1].grid(True, linestyle='--', alpha=0.7)
+                val_accs = metrics_callback.val_accs[:n_epochs] + [
+                    metrics_callback.val_accs[-1]
+                ] * max(0, n_epochs - len(metrics_callback.val_accs))
+                axes[0, 1].plot(
+                    metrics_callback.epochs,
+                    val_accs,
+                    "m-",
+                    label="Validation Accuracy",
+                    linewidth=2,
+                )
+            axes[0, 1].set_title("Training and Validation Accuracy")
+            axes[0, 1].set_xlabel("Epoch")
+            axes[0, 1].set_ylabel("Accuracy")
+            axes[0, 1].set_ylim(
+                0,
+                max(
+                    1.0,
+                    max(
+                        metrics_callback.train_accs
+                        + metrics_callback.val_accs[:n_epochs]
+                        + [0.1]
+                    )
+                    * 1.1,
+                ),
+            )
+            axes[0, 1].legend(loc="best")
+            axes[0, 1].grid(True, linestyle="--", alpha=0.7)
 
             # 3. Learning Rate
             if metrics_callback.lrs:
-                lrs = metrics_callback.lrs[:n_epochs] + [metrics_callback.lrs[-1]] * max(0, n_epochs - len(metrics_callback.lrs))
-                axes[1, 0].plot(metrics_callback.epochs, lrs, 'c-', label='Learning Rate', linewidth=2)
-                axes[1, 0].set_title('Learning Rate Schedule')
-                axes[1, 0].set_xlabel('Epoch')
-                axes[1, 0].set_ylabel('LR')
+                lrs = metrics_callback.lrs[:n_epochs] + [
+                    metrics_callback.lrs[-1]
+                ] * max(0, n_epochs - len(metrics_callback.lrs))
+                axes[1, 0].plot(
+                    metrics_callback.epochs,
+                    lrs,
+                    "c-",
+                    label="Learning Rate",
+                    linewidth=2,
+                )
+                axes[1, 0].set_title("Learning Rate Schedule")
+                axes[1, 0].set_xlabel("Epoch")
+                axes[1, 0].set_ylabel("LR")
                 if max(lrs) > min(lrs) * 10:
-                    axes[1, 0].set_yscale('log')
-                axes[1, 0].legend(loc='best')
-                axes[1, 0].grid(True, linestyle='--', alpha=0.7)
+                    axes[1, 0].set_yscale("log")
+                axes[1, 0].legend(loc="best")
+                axes[1, 0].grid(True, linestyle="--", alpha=0.7)
             else:
-                axes[1, 0].text(0.5, 0.5, 'No LR data available', ha='center', va='center')
-                axes[1, 0].set_title('Learning Rate')
+                axes[1, 0].text(
+                    0.5, 0.5, "No LR data available", ha="center", va="center"
+                )
+                axes[1, 0].set_title("Learning Rate")
 
             # 4. Summary Table
             metrics_summary = [
-                ['Metric', 'Final Value'],
-                ['Train Loss', f"{metrics_callback.train_losses[-1]:.4f}" if metrics_callback.train_losses else "N/A"],
-                ['Val Loss', f"{metrics_callback.val_losses[-1]:.4f}" if metrics_callback.val_losses else "N/A"],
-                ['Train Acc', f"{metrics_callback.train_accs[-1]:.4f}" if metrics_callback.train_accs else "N/A"],
-                ['Val Acc', f"{metrics_callback.val_accs[-1]:.4f}" if metrics_callback.val_accs else "N/A"],
-                ['Final LR', f"{metrics_callback.lrs[-1]:.6f}" if metrics_callback.lrs else "N/A"]
+                ["Metric", "Final Value"],
+                [
+                    "Train Loss",
+                    (
+                        f"{metrics_callback.train_losses[-1]:.4f}"
+                        if metrics_callback.train_losses
+                        else "N/A"
+                    ),
+                ],
+                [
+                    "Val Loss",
+                    (
+                        f"{metrics_callback.val_losses[-1]:.4f}"
+                        if metrics_callback.val_losses
+                        else "N/A"
+                    ),
+                ],
+                [
+                    "Train Acc",
+                    (
+                        f"{metrics_callback.train_accs[-1]:.4f}"
+                        if metrics_callback.train_accs
+                        else "N/A"
+                    ),
+                ],
+                [
+                    "Val Acc",
+                    (
+                        f"{metrics_callback.val_accs[-1]:.4f}"
+                        if metrics_callback.val_accs
+                        else "N/A"
+                    ),
+                ],
+                [
+                    "Final LR",
+                    (
+                        f"{metrics_callback.lrs[-1]:.6f}"
+                        if metrics_callback.lrs
+                        else "N/A"
+                    ),
+                ],
             ]
 
-            axes[1, 1].axis('tight')
-            axes[1, 1].axis('off')
+            axes[1, 1].axis("tight")
+            axes[1, 1].axis("off")
             table = axes[1, 1].table(
                 cellText=metrics_summary[1:],
                 colLabels=metrics_summary[0],
-                cellLoc='center',
-                loc='center'
+                cellLoc="center",
+                loc="center",
             )
             table.auto_set_font_size(False)
             table.set_fontsize(10)
             table.scale(1.2, 1.5)
-            axes[1, 1].set_title('Final Metrics Summary', fontsize=12)
+            axes[1, 1].set_title("Final Metrics Summary", fontsize=12)
 
             plt.tight_layout(rect=[0, 0, 1, 0.95])
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            plot_path = os.path.join(log_dir, f'model_{model_id}_training_{timestamp}.png')
+            plot_path = os.path.join(
+                log_dir, f"model_{model_id}_training_{timestamp}.png"
+            )
 
-            plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+            plt.savefig(plot_path, dpi=300, bbox_inches="tight")
             plt.close(fig)
             return True
 
         except Exception as e:
             print(f"❌ Error generating plot: {str(e)}")
-            raw_path = os.path.join(log_dir, f'model_{model_id}_raw_metrics_{datetime.now().strftime("%Y%m%d_%H%M%S")}.npz')
+            raw_path = os.path.join(
+                log_dir,
+                f'model_{model_id}_raw_metrics_{datetime.now().strftime("%Y%m%d_%H%M%S")}.npz',
+            )
             np.savez(
                 raw_path,
                 epochs=metrics_callback.epochs,
@@ -442,24 +532,23 @@ class DiversityNESRunner:
                 val_losses=metrics_callback.val_losses,
                 train_accs=metrics_callback.train_accs,
                 val_accs=metrics_callback.val_accs,
-                lrs=metrics_callback.lrs
+                lrs=metrics_callback.lrs,
             )
             print(f"🔧 Raw metrics saved for debugging: {raw_path}")
             return False
 
     def _save_error_info(self, model_id: int, error_msg: str):
-        """Сохраняет информацию об ошибке в файл."""
         log_dir = "logs"
         os.makedirs(log_dir, exist_ok=True)
-        
-        error_path = os.path.join(log_dir, f'error_model_{model_id}.txt')
-        with open(error_path, 'w') as f:
+
+        error_path = os.path.join(log_dir, f"error_model_{model_id}.txt")
+        with open(error_path, "w") as f:
             f.write(f"Error occurred during training of model {model_id}:\n")
             f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
             f.write(f"Error details: {error_msg}\n")
             f.write(f"Full traceback:\n")
             traceback.print_exc(file=f)
-        
+
         print(f"Error details saved to: {error_path}")
 
     def evaluate_and_save_results(
@@ -471,7 +560,6 @@ class DiversityNESRunner:
         model_id: int,
         mode: str = "classes",
     ) -> None:
-        """Оценивает модель и сохраняет предсказания."""
         device = next(model.parameters()).device
         model.eval()
         correct = 0
@@ -511,11 +599,11 @@ class DiversityNESRunner:
         self, stats: Optional[Dict[str, Any]], file_name: str = "ensemble_results"
     ) -> Tuple[Optional[float], Optional[List[float]], Optional[float]]:
         """
-        Финализирует оценку ансамбля: вычисляет метрики и сохраняет результаты.
+        Finalizes the evaluation of the ensemble: calculates metrics and saves the results.
 
         Args:
-            stats: Словарь со статистикой из collect_ensemble_stats
-            file_name: Базовое имя файла для сохранения результатов
+            stats: Dictionary with statistics from collect_ensemble_stats
+            file_name: The base file name for saving results
 
         Returns:
             Tuple: (ensemble_accuracy, model_accuracies, ece)
@@ -524,7 +612,6 @@ class DiversityNESRunner:
             print("No stats provided for evaluation.")
             return None, None, None
 
-        # Извлечение базовых метрик
         total = stats["total"]
         correct_ensemble = stats["correct_ensemble"]
         correct_models = stats["correct_models"]
@@ -534,25 +621,21 @@ class DiversityNESRunner:
         model_accs = [100.0 * c / total if total > 0 else 0.0 for c in correct_models]
         avg_model_acc = stats["avg_model_accuracy"] * 100.0
 
-        # Вычисление метрик
         ece = calculate_ece(stats)
         nll = calculate_nll(stats)
         oracle_nll = calculate_oracle_nll(stats)
         brier_score = calculate_brier_score(stats)
 
-        # Метрики разнообразия
         predictive_disagreement = stats.get("predictive_disagreement", float("nan"))
         normalized_predictive_disagreement = stats.get(
             "normalized_predictive_disagreement", float("nan")
         )
         ambiguity = stats.get("ambiguity", float("nan"))
 
-        # Adversarial атаки
         fgsm_results = stats.get("fgsm_results", {})
         bim_results = stats.get("bim_results", {})
         pgd_results = stats.get("pgd_results", {})
 
-        # -------- Форматированный вывод в консоль ----------
         print("=" * 60)
         print("ENSEMBLE EVALUATION RESULTS")
         print("=" * 60)
@@ -639,7 +722,6 @@ class DiversityNESRunner:
 
         print("\n" + "=" * 60)
 
-        # --------- Запись в файл --------------
         output_path = Path(self.config.output_path)
         output_path.mkdir(exist_ok=True)
         experiment_num = self._get_free_file_index(str(output_path), file_name)
@@ -729,7 +811,6 @@ class DiversityNESRunner:
             else:
                 f.write("PGD results not available.\n")
 
-            # Дополнительная информация для анализа
             f.write("\n" + "=" * 60 + "\n")
             f.write("ADDITIONAL INFORMATION\n")
             f.write("=" * 60 + "\n")
@@ -738,7 +819,6 @@ class DiversityNESRunner:
             )
             f.write(f"NLL improvement (Oracle - Ensemble): {oracle_nll - nll:.4f}\n")
 
-            # Робастность к атакам
             if fgsm_results:
                 max_eps_fgsm = max(fgsm_results.keys())
                 fgsm_degradation = (
@@ -770,21 +850,18 @@ class DiversityNESRunner:
         return ensemble_acc, model_accs, ece
 
     def _get_free_file_index(self, path: str, file_name: str) -> int:
-        """Находит свободный индекс для имени файла."""
         experiment_num = 0
         while (Path(path) / f"{file_name}_{experiment_num}.txt").exists():
             experiment_num += 1
         return experiment_num
 
     def _get_free_file_index_dir(self, path: str, dir_name: str) -> int:
-        """Находит свободный индекс для имени папки."""
         experiment_num = 1
         while (Path(path) / f"{dir_name}_{experiment_num}").exists():
             experiment_num += 1
         return experiment_num
 
     def get_latest_index_from_dir(self, base_path: Optional[Path] = None) -> int:
-        """Находит последний индекс в директориях models_json_*."""
         if base_path is None:
             base_path = Path(self.config.best_models_save_path)
 
@@ -813,7 +890,7 @@ class DiversityNESRunner:
         archs_path,
         pth_path,
     ):
-        """Целевой процесс для параллельного обучения."""
+        """The target process for parallel learning."""
         os.environ["CUDA_VISIBLE_DEVICES"] = str(physical_gpu_id)
 
         if torch.cuda.is_available():
@@ -823,14 +900,16 @@ class DiversityNESRunner:
         torch.set_float32_matmul_precision("high")
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-        runner = DiversityNESRunner(config, DatasetsInfo.get(config.dataset_name.lower()))
+        runner = DiversityNESRunner(
+            config, DatasetsInfo.get(config.dataset_name.lower())
+        )
         train_loader, valid_loader, test_loader = runner.get_data_loaders()
 
         model = runner.train_model(architecture, train_loader, None, model_id)
         model = model.to(device)
 
         torch.save(model.state_dict(), pth_path / f"model_{model_id}.pth")
-        print(f"[GPU {physical_gpu_id}] ✅ Model {model_id} saved to {pth_path}")
+        print(f"[GPU {physical_gpu_id}] Model {model_id} saved to {pth_path}")
 
         eval_loader = test_loader if config.evaluate_ensemble_flag else valid_loader
         runner.evaluate_and_save_results(
@@ -840,9 +919,7 @@ class DiversityNESRunner:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-
     def fill_models_list(self, archs_path, pth_path) -> None:
-        """Загружает обученные модели из .pth и .json."""
         if not archs_path.exists() or not pth_path.exists():
             raise FileNotFoundError(f"Missing directories: {archs_path}, {pth_path}")
 
@@ -878,15 +955,15 @@ class DiversityNESRunner:
                 model.load_state_dict(state_dict)
                 model = model.to(self.device)
                 self.models.append(model)
-                print(f"✅ Model {model_id} loaded")
+                print(f"Model {model_id} loaded")
 
             except Exception as e:
-                print(f"❌ Failed to load {json_file}: {e}")
+                print(f"Failed to load {json_file}: {e}")
 
-        print(f"✅ Loaded {len(self.models)} models.")
+        print(f"Loaded {len(self.models)} models.")
 
     def run_pretrained(self, index: int) -> None:
-        """Загружает и параллельно оценивает предобученные модели по индексу."""
+        """Loads and evaluates pretrained models in parallel by index."""
         root_dir = Path(self.config.best_models_save_path)
         json_dir = root_dir / f"trained_models_archs_{index}"
         pth_dir = root_dir / f"trained_models_pth_{index}"
@@ -901,13 +978,11 @@ class DiversityNESRunner:
         if not arch_dicts:
             raise RuntimeError("No architectures found")
 
-        # Подготовка директорий для сохранения результатов
         eval_output_dir = (
             Path(self.config.output_path) / f"trained_models_archs_{index}"
         )
         eval_output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Получаем список моделей: (arch, model_id, pth_path)
         model_tasks = []
         for entry in arch_dicts:
             arch = entry["architecture"]
@@ -916,12 +991,12 @@ class DiversityNESRunner:
                 raise ValueError("Missing 'id' in architecture")
             pth_file = pth_dir / f"model_{model_id}.pth"
             if not pth_file.exists():
-                print(f"⚠️ Skipping model {model_id}: weights not found at {pth_file}")
+                print(f"Skipping model {model_id}: weights not found at {pth_file}")
                 continue
             model_tasks.append((arch, model_id, pth_file))
 
         if not model_tasks:
-            print("⚠️ No valid models to evaluate.")
+            print("No valid models to evaluate.")
             return
 
         n_models = len(model_tasks)
@@ -932,9 +1007,8 @@ class DiversityNESRunner:
         print(f"Available GPUs: {available_gpus}")
         print(f"Evaluating {n_models} models, up to {max_per_gpu} per GPU")
 
-        # Запуск параллельных процессов
         processes = []
-        active_processes = []  # будем хранить (process, model_id) для отслеживания
+        active_processes = []
 
         for idx, (arch, model_id, pth_path) in enumerate(model_tasks):
             gpu_idx = (idx // max_per_gpu) % n_gpus
@@ -957,9 +1031,7 @@ class DiversityNESRunner:
             active_processes.append((p, model_id))
             print(f"Started evaluation of model {model_id} on GPU {physical_gpu_id}")
 
-            # Ограничение активных процессов
             while len(active_processes) >= n_gpus * max_per_gpu:
-                # Проверяем завершённые процессы
                 for proc, mid in active_processes[:]:
                     if not proc.is_alive():
                         proc.join()
@@ -967,24 +1039,21 @@ class DiversityNESRunner:
                         break
                 time.sleep(0.5)
 
-        # Дожидаемся всех оставшихся + прогресс-бар
         completed = 0
         with tqdm(total=n_models, desc="Evaluating models") as pbar:
             while active_processes:
-                # Проверяем все процессы на завершение
                 for proc, mid in active_processes[:]:
                     if not proc.is_alive():
                         proc.join()
                         active_processes.remove((proc, mid))
                         completed += 1
                         pbar.update(1)
-                time.sleep(0.5)  # небольшая пауза, чтобы не грузить CPU
+                time.sleep(0.5)
 
         print(f"✅ All models from index {index} evaluated!")
 
-        # Если нужно — оценить ансамбль
         if self.config.evaluate_ensemble_flag:
-            print("📊 Evaluating ensemble for pretrained models...")
+            print("Evaluating ensemble for pretrained models...")
             self.models = []
             self._load_models_from_index(index)
             if self.models:
@@ -1000,7 +1069,7 @@ class DiversityNESRunner:
                 )
                 self.finalize_ensemble_evaluation(stats, f"ensemble_results_{index}")
             else:
-                print("❌ No models loaded for ensemble evaluation.")
+                print("No models loaded for ensemble evaluation.")
 
     @staticmethod
     def _evaluate_single_model_process(
@@ -1013,7 +1082,7 @@ class DiversityNESRunner:
         dataset_key: str,
         num_classes: int,
     ):
-        """Процесс оценки одной предобученной модели."""
+        """The process of evaluating a single pre-trained model."""
         os.environ["CUDA_VISIBLE_DEVICES"] = str(physical_gpu_id)
 
         try:
@@ -1024,7 +1093,6 @@ class DiversityNESRunner:
 
             device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-            # Воссоздаём runner для получения трансформаций и загрузчиков
             info = DatasetsInfo.get(config.dataset_name.lower())
             runner = DiversityNESRunner(config, info)
             _, valid_loader, test_loader = runner.get_data_loaders()
@@ -1034,7 +1102,6 @@ class DiversityNESRunner:
             else:
                 eval_loader = valid_loader
 
-            # Загружаем модель
             with model_context(architecture):
                 model = DartsSpace(
                     width=config.width,
@@ -1045,7 +1112,6 @@ class DiversityNESRunner:
             model.load_state_dict(state_dict)
             model = model.to(device)
 
-            # Оцениваем
             runner.evaluate_and_save_results(
                 model,
                 architecture,
@@ -1056,14 +1122,14 @@ class DiversityNESRunner:
             )
 
         except Exception as e:
-            print(f"❌ Error evaluating model {model_id} on GPU {physical_gpu_id}: {e}")
+            print(f"Error evaluating model {model_id} on GPU {physical_gpu_id}: {e}")
             raise
         finally:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
     def _load_models_from_index(self, index: int) -> None:
-        """Загружает все модели из указанного индекса для ансамбля."""
+        """Loads all models from the specified index for the ensemble."""
         root_dir = Path(self.config.best_models_save_path)
         json_dir = root_dir / f"trained_models_archs_{index}"
         pth_dir = root_dir / f"trained_models_pth_{index}"
@@ -1092,12 +1158,11 @@ class DiversityNESRunner:
             self.models.append(model)
 
     def run_all_pretrained(self) -> None:
-        """Оценивает все сохранённые ансамбли."""
+        """Evaluates all saved ensembles."""
         root_dir = Path(self.config.best_models_save_path)
         if not root_dir.exists():
             raise FileNotFoundError(f"Directory not found: {root_dir}")
 
-        # last_index = self.get_latest_index_from_dir(root_dir)
         last_index = self._get_free_file_index_dir(root_dir, "trained_models_archs")
         print(f"Last index: {last_index}")
         for idx in range(1, last_index + 1):
@@ -1105,12 +1170,11 @@ class DiversityNESRunner:
                 root_dir / f"trained_models_pth_{idx}"
             ).exists():
                 self.run_pretrained(idx)
-                self.models = []  # очистка после каждого индекса
+                self.models = []
             else:
                 print(f"Skipping index {idx}: missing directories.")
 
     def run(self) -> None:
-        """Основной пайплайн: обучение или оценка."""
         try:
             mp.set_start_method("spawn", force=True)
         except RuntimeError:
@@ -1189,7 +1253,6 @@ class DiversityNESRunner:
             processes.append(p)
             print(f"Started model {idx} on GPU {physical_gpu_id}")
 
-            # Ограничение количества процессов
             while len(processes) >= n_gpus * max_per_gpu:
                 time.sleep(2)
                 for p in processes[:]:
@@ -1198,14 +1261,12 @@ class DiversityNESRunner:
                         processes.remove(p)
                         break
 
-        # Ожидание завершения всех процессов
         for p in processes:
             p.join()
-        print("✅ All models trained!")
+        print("All models trained!")
 
-        # Оценка ансамбля
         if self.config.evaluate_ensemble_flag:
-            print("📊 Evaluating ensemble...")
+            print("Evaluating ensemble...")
             for cur_index, (archs_path, pth_path) in enumerate(archs_and_pth_path_list):
                 self.models = []
                 self.fill_models_list(archs_path, pth_path)
@@ -1224,21 +1285,20 @@ class DiversityNESRunner:
                         stats, f"ensemble_results_{cur_index}"
                     )
                 else:
-                    print("❌ No models to evaluate.")
+                    print("No models to evaluate.")
         else:
-            print("⏭️ Ensemble evaluation skipped.")
+            print("Ensemble evaluation skipped.")
 
-        print("🎉 Training and evaluation completed!")
+        print("Training and evaluation completed!")
 
     def _get_available_gpus(self) -> List[int]:
-        """Определяет доступные GPU."""
         cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "")
         if cuda_visible:
             return [int(x.strip()) for x in cuda_visible.split(",")]
         return list(range(torch.cuda.device_count()))
 
 
-# === ТОЧКА ВХОДА ===
+# === ENTRY POINT ===
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="DARTS NAS Runner")
