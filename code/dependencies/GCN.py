@@ -606,7 +606,7 @@ def train_model_accuracy(
     device="cpu",
     developer_mode=False,
     final_lr=0.001,
-    save_path="checkpoints/best_accuracy_model.pth",  # можно передать другой путь
+    save_path="checkpoints/best_accuracy_model.pth",
 ):
     model.to(device)
     train_losses = []
@@ -614,7 +614,7 @@ def train_model_accuracy(
 
     scheduler = CosineAnnealingLR(optimizer, T_max=num_epochs, eta_min=final_lr)
 
-    # --- Создаём временную папку ---
+    # --- Creating temporary directory ---
     checkpoint_dir = os.path.dirname(save_path)
     if checkpoint_dir and not os.path.exists(checkpoint_dir):
         os.makedirs(checkpoint_dir, exist_ok=True)

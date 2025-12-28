@@ -1,7 +1,7 @@
 import os
-os.environ["OPENBLAS_NUM_THREADS"] = "4"  
-os.environ["OMP_NUM_THREADS"] = "1"       
-os.environ["MKL_NUM_THREADS"] = "1" 
+# os.environ["OPENBLAS_NUM_THREADS"] = "4"  
+# os.environ["OMP_NUM_THREADS"] = "1"       
+# os.environ["MKL_NUM_THREADS"] = "1" 
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -20,7 +20,7 @@ from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 from sklearn.cluster import OPTICS, DBSCAN, KMeans
 from sklearn.metrics import silhouette_samples, silhouette_score
-from nni.nas.space import model_context
+# from nni.nas.space import model_context
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
 from scipy.spatial.distance import cdist
