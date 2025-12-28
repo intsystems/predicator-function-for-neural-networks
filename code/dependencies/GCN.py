@@ -463,13 +463,12 @@ def train_model_diversity(
     device="cpu",
     developer_mode=False,
     final_lr=0.001,
-    save_path="checkpoints/best_diversity_model.pth",  # путь к чекпоинту
+    save_path="checkpoints/best_diversity_model.pth",  # path to save the best model
 ):
     model.to(device)
     train_losses, valid_losses = [], []
     scheduler = CosineAnnealingLR(optimizer, T_max=num_epochs, eta_min=final_lr)
 
-    # --- Создаём временную папку ---
     checkpoint_dir = os.path.dirname(save_path)
     if checkpoint_dir and not os.path.exists(checkpoint_dir):
         os.makedirs(checkpoint_dir, exist_ok=True)
@@ -496,28 +495,22 @@ def train_model_diversity(
 
                 optimizer.zero_grad()
 
-                # Move to device
                 anchor_batch = anchor_batch.to(device)
                 pos_batch = pos_batch.to(device)
                 neg_batch = neg_batch.to(device)
 
-                # Forward pass
                 emb_anchor = model(
                     anchor_batch.x, anchor_batch.edge_index, anchor_batch.batch
                 )
                 emb_pos = model(pos_batch.x, pos_batch.edge_index, pos_batch.batch)
                 emb_neg = model(neg_batch.x, neg_batch.edge_index, neg_batch.batch)
 
-                # Loss & step
                 loss = criterion(emb_anchor, emb_pos, emb_neg)
                 loss.backward()
                 optimizer.step()
 
                 running_loss += loss.item()
                 n_batches += 1
-                if i==0:  # только для первого батча
-                    print(f"Mean d(a, p): {(emb_anchor-emb_pos).norm(dim=1).mean().item():.4f}")
-                    print(f"Mean d(a, n): {(emb_anchor-emb_neg).norm(dim=1).mean().item():.4f}")
 
             scheduler.step()
             avg_train_loss = running_loss / max(1, n_batches)
@@ -554,7 +547,6 @@ def train_model_diversity(
             avg_valid_loss = val_loss / max(1, n_val_batches)
             valid_losses.append(avg_valid_loss)
 
-            # === Сохранение лучшей модели ===
             if avg_valid_loss < best_valid_loss:
                 best_valid_loss = avg_valid_loss
                 torch.save(model.state_dict(), save_path)
@@ -562,31 +554,27 @@ def train_model_diversity(
                     f"✅ Best diversity model saved to {save_path} (Valid Loss: {avg_valid_loss:.4f})"
                 )
 
-            # === Логирование ===
             lr = scheduler.get_last_lr()[0]
             print(
                 f"Epoch {epoch+1}/{num_epochs} — "
                 f"Train Loss: {avg_train_loss:.4f}, Valid Loss: {avg_valid_loss:.4f}, LR: {lr:.6f}"
             )
 
-        # === Загружаем лучшую модель в память ===
+        # === Loading best model ===
         model.load_state_dict(torch.load(save_path, map_location=device))
         print(f"✅ Loaded best diversity model from {save_path}")
 
     except Exception as e:
-        # Удаляем папку при ошибке
         if temp_dir_created and checkpoint_dir and os.path.exists(checkpoint_dir):
             shutil.rmtree(checkpoint_dir, ignore_errors=True)
             print(f"🧹 Temporary directory '{checkpoint_dir}' removed after error.")
         raise
 
     finally:
-        # === Удаляем временную папку в любом случае ===
         if temp_dir_created and checkpoint_dir and os.path.exists(checkpoint_dir):
             shutil.rmtree(checkpoint_dir, ignore_errors=True)
             print(f"🧹 Temporary directory '{checkpoint_dir}' removed.")
 
-    # === Построение графика ===
     tmp_train_losses = np.array(train_losses)
     tmp_valid_losses = np.array(valid_losses)
     plot_train_valid_losses(
@@ -614,7 +602,6 @@ def train_model_accuracy(
 
     scheduler = CosineAnnealingLR(optimizer, T_max=num_epochs, eta_min=final_lr)
 
-    # --- Creating temporary directory ---
     checkpoint_dir = os.path.dirname(save_path)
     if checkpoint_dir and not os.path.exists(checkpoint_dir):
         os.makedirs(checkpoint_dir, exist_ok=True)
@@ -739,9 +726,8 @@ def save_accuracy_predictions(
             )
             target = data.y.cpu().numpy()
 
-            # Переводим в проценты, если нужно
             if target.max() <= 1.0:
-                target = target * 100  # [0, 1] → [0, 100]
+                target = target * 100
             if prediction.max() <= 1.0:
                 prediction = prediction * 100
 
@@ -751,21 +737,16 @@ def save_accuracy_predictions(
     true_accs = np.array(true_accs)
     pred_accs = np.array(pred_accs)
 
-    # === Метрики ДО сортировки ===
     r2 = r2_score(true_accs, pred_accs)
     mae = mean_absolute_error(true_accs, pred_accs)
     rmse = np.sqrt(mean_squared_error(true_accs, pred_accs))
 
-    # === Доп. метрики: Rank-AUC / Spearman ===
-    # Spearman оценивает ранговую корреляцию, отлично подходит для подобных задач
     spearman_corr, _ = spearmanr(true_accs, pred_accs)
 
-    # === Сортировка по true_acc (убывание) ===
     sorted_indices = np.argsort(true_accs)[::-1]
     true_accs_sorted = true_accs[sorted_indices]
     pred_accs_sorted = pred_accs[sorted_indices]
 
-    # === Сохраняем ===
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
     with open(file_path, "w", encoding="utf-8") as f:
         f.write("# Accuracy prediction metrics\n")
@@ -780,7 +761,7 @@ def save_accuracy_predictions(
 
     print(f"✅ Saved sorted predictions and metrics to {file_path}")
     print(
-        f"   R²={r2:.4f}, MAE={mae:.4f}, RMSE={rmse:.4f}, "
+        f"   R^2={r2:.4f}, MAE={mae:.4f}, RMSE={rmse:.4f}, "
         f"Spearman={spearman_corr:.4f}"
     )
     print("   Entries sorted by true_acc (descending)")
@@ -839,7 +820,6 @@ def get_positive_and_negative(diversity_matrix, indices, dataset=None):
             positive_indices.append(None)
             negative_indices.append(None)
         else:
-            # Выбираем случайный положительный и отрицательный пример
             positive_indices.append(np.random.choice(positive))
             negative_indices.append(np.random.choice(negative))
 
