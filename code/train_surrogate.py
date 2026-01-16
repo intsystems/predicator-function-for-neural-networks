@@ -1,6 +1,4 @@
 import json
-import logging
-import random
 import os
 from pathlib import Path
 from typing import Optional
@@ -16,6 +14,9 @@ from torch.utils.data import random_split, DataLoader
 from scipy.spatial import distance
 import shutil
 import matplotlib.pyplot as plt
+import matplotlib  # fastfix
+
+matplotlib.use("TkAgg")
 
 # Custom imports
 import sys
@@ -25,7 +26,6 @@ sys.path.insert(1, "../dependencies")
 from dependencies.data_generator import load_dataset
 from dependencies.train_config import TrainConfig
 from dependencies.GCN import (
-    GAT_ver_1,
     GAT_ver_2,
     CustomDataset,
     TripletGraphDataset,
@@ -34,10 +34,6 @@ from dependencies.GCN import (
     collate_triplets,
     collate_graphs,
 )
-
-# Setup logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 
 class SurrogateTrainer:
@@ -213,7 +209,7 @@ class SurrogateTrainer:
 
     def train_accuracy_model(self) -> None:
         self.config.model_accuracy = GAT_ver_2(
-            self.config.input_dim,
+            input_dim=self.config.input_dim,
             output_dim=1,
             dropout=self.config.acc_dropout,
             heads=self.config.acc_n_heads,
@@ -225,12 +221,12 @@ class SurrogateTrainer:
             self.config.model_accuracy.parameters(), lr=self.config.acc_lr_start
         )
         train_model_accuracy(
-            self.config.model_accuracy,
-            self.config.train_loader_accuracy,
-            self.config.valid_loader_accuracy,
-            opt,
-            nn.MSELoss(),
-            self.config.acc_num_epochs,
+            model=self.config.model_accuracy,
+            train_loader=self.config.train_loader_accuracy,
+            valid_loader=self.config.valid_loader_accuracy,
+            optimizer=opt,
+            criterion=nn.MSELoss(),
+            num_epochs=self.config.acc_num_epochs,
             device=self.device,
             developer_mode=self.config.developer_mode,
             final_lr=self.config.acc_lr_end,
@@ -257,12 +253,12 @@ class SurrogateTrainer:
             self.config.model_diversity.parameters(), lr=self.config.div_lr_start
         )
         train_model_diversity(
-            self.config.model_diversity,
-            self.config.train_loader_diversity,
-            self.config.valid_loader_diversity,
-            opt,
-            lambda a, p, n: self._triplet_loss(a, p, n),
-            self.config.div_num_epochs,
+            model=self.config.model_diversity,
+            train_loader=self.config.train_loader_diversity,
+            valid_loader=self.config.valid_loader_diversity,
+            optimizer=opt,
+            criterion=lambda a, p, n: self._triplet_loss(a, p, n),
+            num_epochs=self.config.div_num_epochs,
             device=self.device,
             developer_mode=self.config.developer_mode,
             final_lr=self.config.div_lr_end,
@@ -321,7 +317,7 @@ def compute_overlap_diversity_matrix(preds):
 
 @njit
 def compute_js_row(probs_i, probs_rest):
-    """Вычисляет JS-дивергенции между probs_i и всеми в probs_rest."""
+    """Calculates JS divergences between probs_i and all in probs_rest."""
     n_models_rest, n_samples, n_classes = probs_rest.shape
     js_vals = np.empty(n_models_rest, dtype=np.float32)
     for j in range(n_models_rest):

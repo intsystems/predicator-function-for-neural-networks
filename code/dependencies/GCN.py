@@ -24,15 +24,12 @@ from torch_geometric.utils import dropout_edge
 from torch_geometric.nn import GATv2Conv, GraphNorm
 from torch_geometric.nn.aggr import AttentionalAggregation
 
-from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
-import collections
 
 from sklearn.metrics import (
     r2_score,
     mean_absolute_error,
     mean_squared_error,
-    roc_auc_score,
 )
 from scipy.stats import spearmanr
 
@@ -41,13 +38,6 @@ from Graph import Graph
 
 
 class GATBlock(nn.Module):
-    """
-    - Identity residual, если in_dim == out_dim
-    - Поддержка Pre-Norm (до GAT) и Post-Norm (после)
-    - ELU по умолчанию
-    - DropEdge (edge_dropout > 0)
-    """
-
     def __init__(
         self,
         in_dim: int,
@@ -59,7 +49,7 @@ class GATBlock(nn.Module):
         activation: nn.Module = None,
     ):
         super().__init__()
-        assert out_dim % heads == 0, "out_dim должно быть кратно числу голов."
+        assert out_dim % heads == 0, "out_dim must be a multiple of the number of heads."
 
         self.in_dim = in_dim
         self.out_dim = out_dim
@@ -74,11 +64,9 @@ class GATBlock(nn.Module):
         self.act = activation if activation is not None else nn.ELU()
 
         if pre_norm:
-            # Pre-Norm: нормализуем вход → используем in_dim
             self.norm_pre = GraphNorm(in_dim)
             self.norm_post = nn.Identity()
         else:
-            # Post-Norm: нормализуем выход → используем out_dim
             self.norm_pre = nn.Identity()
             self.norm_post = GraphNorm(out_dim)
 
@@ -94,11 +82,9 @@ class GATBlock(nn.Module):
             self.norm_pre.reset_parameters()
 
     def forward(self, x, edge_index, batch):
-        # Edge dropout (только в train)
         if self.training and self.edge_dropout > 0.0:
             edge_index, _ = dropout_edge(edge_index, p=self.edge_dropout, training=True)
 
-        # === Pre-Norm: до GAT, по in_dim ===
         x_for_gat = (
             self.norm_pre(x, batch) if isinstance(self.norm_pre, GraphNorm) else x
         )
@@ -107,7 +93,6 @@ class GATBlock(nn.Module):
         res = self.res_proj(x)
         h = self.act(h + res)
 
-        # === Post-Norm: после, по out_dim ===
         if isinstance(self.norm_post, GraphNorm):
             h = self.norm_post(h, batch)
 
@@ -304,7 +289,6 @@ class GAT_ver_2(nn.Module):
             return out
 
 
-# ВАЖНО: функция должна быть в глобальной области, чтобы multiprocessing мог её сериализовать
 def load_single_graph(args: tuple):
     json_path_str, idx, accuracies = args
     try:
@@ -315,7 +299,7 @@ def load_single_graph(args: tuple):
         graph = Graph(model_dict, index=idx)
         adj, _, features = (
             graph.get_adjacency_matrix()
-        )  # предполагаем: adj и features — list или np.array
+        )
 
         adj = np.array(adj)
         features = np.array(features)
@@ -326,7 +310,7 @@ def load_single_graph(args: tuple):
             "idx": idx,
             "x": features.astype(
                 np.float32
-            ).tolist(),  # или .tolist() для JSON-совместимости
+            ).tolist(),
             "edge_index": edge_index,
             "y": float(accuracies[idx]) if accuracies is not None else None,
         }
@@ -463,13 +447,12 @@ def train_model_diversity(
     device="cpu",
     developer_mode=False,
     final_lr=0.001,
-    save_path="checkpoints/best_diversity_model.pth",  # путь к чекпоинту
+    save_path="checkpoints/best_diversity_model.pth",  # path to save the best model
 ):
     model.to(device)
     train_losses, valid_losses = [], []
     scheduler = CosineAnnealingLR(optimizer, T_max=num_epochs, eta_min=final_lr)
 
-    # --- Создаём временную папку ---
     checkpoint_dir = os.path.dirname(save_path)
     if checkpoint_dir and not os.path.exists(checkpoint_dir):
         os.makedirs(checkpoint_dir, exist_ok=True)
@@ -496,28 +479,22 @@ def train_model_diversity(
 
                 optimizer.zero_grad()
 
-                # Move to device
                 anchor_batch = anchor_batch.to(device)
                 pos_batch = pos_batch.to(device)
                 neg_batch = neg_batch.to(device)
 
-                # Forward pass
                 emb_anchor = model(
                     anchor_batch.x, anchor_batch.edge_index, anchor_batch.batch
                 )
                 emb_pos = model(pos_batch.x, pos_batch.edge_index, pos_batch.batch)
                 emb_neg = model(neg_batch.x, neg_batch.edge_index, neg_batch.batch)
 
-                # Loss & step
                 loss = criterion(emb_anchor, emb_pos, emb_neg)
                 loss.backward()
                 optimizer.step()
 
                 running_loss += loss.item()
                 n_batches += 1
-                if i==0:  # только для первого батча
-                    print(f"Mean d(a, p): {(emb_anchor-emb_pos).norm(dim=1).mean().item():.4f}")
-                    print(f"Mean d(a, n): {(emb_anchor-emb_neg).norm(dim=1).mean().item():.4f}")
 
             scheduler.step()
             avg_train_loss = running_loss / max(1, n_batches)
@@ -554,39 +531,34 @@ def train_model_diversity(
             avg_valid_loss = val_loss / max(1, n_val_batches)
             valid_losses.append(avg_valid_loss)
 
-            # === Сохранение лучшей модели ===
             if avg_valid_loss < best_valid_loss:
                 best_valid_loss = avg_valid_loss
                 torch.save(model.state_dict(), save_path)
                 print(
-                    f"✅ Best diversity model saved to {save_path} (Valid Loss: {avg_valid_loss:.4f})"
+                    f"Best diversity model saved to {save_path} (Valid Loss: {avg_valid_loss:.4f})"
                 )
 
-            # === Логирование ===
             lr = scheduler.get_last_lr()[0]
             print(
                 f"Epoch {epoch+1}/{num_epochs} — "
                 f"Train Loss: {avg_train_loss:.4f}, Valid Loss: {avg_valid_loss:.4f}, LR: {lr:.6f}"
             )
 
-        # === Загружаем лучшую модель в память ===
+        # === Loading best model ===
         model.load_state_dict(torch.load(save_path, map_location=device))
-        print(f"✅ Loaded best diversity model from {save_path}")
+        print(f"Loaded best diversity model from {save_path}")
 
     except Exception as e:
-        # Удаляем папку при ошибке
         if temp_dir_created and checkpoint_dir and os.path.exists(checkpoint_dir):
             shutil.rmtree(checkpoint_dir, ignore_errors=True)
-            print(f"🧹 Temporary directory '{checkpoint_dir}' removed after error.")
+            print(f"Temporary directory '{checkpoint_dir}' removed after error.")
         raise
 
     finally:
-        # === Удаляем временную папку в любом случае ===
         if temp_dir_created and checkpoint_dir and os.path.exists(checkpoint_dir):
             shutil.rmtree(checkpoint_dir, ignore_errors=True)
-            print(f"🧹 Temporary directory '{checkpoint_dir}' removed.")
+            print(f"Temporary directory '{checkpoint_dir}' removed.")
 
-    # === Построение графика ===
     tmp_train_losses = np.array(train_losses)
     tmp_valid_losses = np.array(valid_losses)
     plot_train_valid_losses(
@@ -606,7 +578,7 @@ def train_model_accuracy(
     device="cpu",
     developer_mode=False,
     final_lr=0.001,
-    save_path="checkpoints/best_accuracy_model.pth",  # можно передать другой путь
+    save_path="checkpoints/best_accuracy_model.pth",
 ):
     model.to(device)
     train_losses = []
@@ -614,7 +586,6 @@ def train_model_accuracy(
 
     scheduler = CosineAnnealingLR(optimizer, T_max=num_epochs, eta_min=final_lr)
 
-    # --- Создаём временную папку ---
     checkpoint_dir = os.path.dirname(save_path)
     if checkpoint_dir and not os.path.exists(checkpoint_dir):
         os.makedirs(checkpoint_dir, exist_ok=True)
@@ -677,7 +648,7 @@ def train_model_accuracy(
                 best_valid_loss = avg_valid_loss
                 torch.save(model.state_dict(), save_path)
                 print(
-                    f"✅ Best model saved to {save_path} (Valid Loss: {avg_valid_loss * 1e4:.4f})"
+                    f"Best model saved to {save_path} (Valid Loss: {avg_valid_loss * 1e4:.4f})"
                 )
 
             lr = scheduler.get_last_lr()[0]
@@ -687,18 +658,18 @@ def train_model_accuracy(
             )
 
         model.load_state_dict(torch.load(save_path, map_location=device))
-        print(f"✅ Loaded best model from {save_path}")
+        print(f"Loaded best model from {save_path}")
 
     except Exception as e:
         if temp_dir_created and checkpoint_dir and os.path.exists(checkpoint_dir):
             shutil.rmtree(checkpoint_dir, ignore_errors=True)
-            print(f"🧹 Temporary directory '{checkpoint_dir}' removed after error.")
+            print(f"Temporary directory '{checkpoint_dir}' removed after error.")
         raise
 
     finally:
         if temp_dir_created and checkpoint_dir and os.path.exists(checkpoint_dir):
             shutil.rmtree(checkpoint_dir, ignore_errors=True)
-            print(f"🧹 Temporary directory '{checkpoint_dir}' removed.")
+            print(f"Temporary directory '{checkpoint_dir}' removed.")
 
     tmp_train_losses = np.sqrt(np.array(train_losses))
     tmp_valid_losses = np.sqrt(np.array(valid_losses))
@@ -739,9 +710,8 @@ def save_accuracy_predictions(
             )
             target = data.y.cpu().numpy()
 
-            # Переводим в проценты, если нужно
             if target.max() <= 1.0:
-                target = target * 100  # [0, 1] → [0, 100]
+                target = target * 100
             if prediction.max() <= 1.0:
                 prediction = prediction * 100
 
@@ -751,21 +721,16 @@ def save_accuracy_predictions(
     true_accs = np.array(true_accs)
     pred_accs = np.array(pred_accs)
 
-    # === Метрики ДО сортировки ===
     r2 = r2_score(true_accs, pred_accs)
     mae = mean_absolute_error(true_accs, pred_accs)
     rmse = np.sqrt(mean_squared_error(true_accs, pred_accs))
 
-    # === Доп. метрики: Rank-AUC / Spearman ===
-    # Spearman оценивает ранговую корреляцию, отлично подходит для подобных задач
     spearman_corr, _ = spearmanr(true_accs, pred_accs)
 
-    # === Сортировка по true_acc (убывание) ===
     sorted_indices = np.argsort(true_accs)[::-1]
     true_accs_sorted = true_accs[sorted_indices]
     pred_accs_sorted = pred_accs[sorted_indices]
 
-    # === Сохраняем ===
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
     with open(file_path, "w", encoding="utf-8") as f:
         f.write("# Accuracy prediction metrics\n")
@@ -778,9 +743,9 @@ def save_accuracy_predictions(
         for true, pred in zip(true_accs_sorted, pred_accs_sorted):
             f.write(f"{true:.4f} {pred:.4f}\n")
 
-    print(f"✅ Saved sorted predictions and metrics to {file_path}")
+    print(f"Saved sorted predictions and metrics to {file_path}")
     print(
-        f"   R²={r2:.4f}, MAE={mae:.4f}, RMSE={rmse:.4f}, "
+        f"   R^2={r2:.4f}, MAE={mae:.4f}, RMSE={rmse:.4f}, "
         f"Spearman={spearman_corr:.4f}"
     )
     print("   Entries sorted by true_acc (descending)")
@@ -839,7 +804,6 @@ def get_positive_and_negative(diversity_matrix, indices, dataset=None):
             positive_indices.append(None)
             negative_indices.append(None)
         else:
-            # Выбираем случайный положительный и отрицательный пример
             positive_indices.append(np.random.choice(positive))
             negative_indices.append(np.random.choice(negative))
 

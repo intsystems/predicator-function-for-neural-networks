@@ -1,0 +1,68 @@
+{
+    "seed": 42,
+    "num_workers": 20,
+    "dataset_path": "/home/alexander/RAS/m1p/predicator-function-for-neural-networks/code/datasets/fashionmnist_united",
+    "acc_dataset_path": "/home/alexander/RAS/m1p/predicator-function-for-neural-networks/code/datasets/fashionmnist_united",
+    "div_dataset_path": "/home/alexander/RAS/m1p/predicator-function-for-neural-networks/code/datasets/fashionmnist_united",
+
+    "device": "cpu",
+    "developer_mode": false,
+
+    "n_models": 2785,
+
+    "upper_margin": 0.9,
+    "lower_margin": 0.1,
+    "diversity_matrix_metric": "overlap",
+
+    "train_size": 0.8,
+    "batch_size": 64,
+    "input_dim": 8,
+
+    "acc_num_epochs": 100,
+    "acc_lr_start": 5e-3,
+    "acc_lr_end": 1e-4,
+    "acc_dropout": 0,
+    "acc_n_heads": 16,
+
+    "div_num_epochs": 50,
+    "div_lr_start": 5e-4,
+    "div_lr_end": 1e-5,
+    "div_dropout": 0,
+    "div_n_heads": 16,
+    "margin": 1,
+    "div_output_dim": 16,
+
+    "surrogate_inference_path": "/home/alexander/RAS/m1p/predicator-function-for-neural-networks/code/surrogate_models",
+
+    "use_pretrained_models_for_ensemble": false,
+    "n_ensemble_models": 3,
+    "n_models_in_pool": 4096,
+    "n_models_to_generate": 10,
+    "batch_size_inference": 4096,
+    "min_accuracy_for_pool": 0.9,
+    "acc_distance_gamma": 1,
+    "min_acc_and_div_to_ensemble": 0.9,
+    "best_models_save_path": "best_models/",
+    "tmp_archs_path": "datasets/tmp_archs/",
+    "random_choice_out_of_best": true,
+    "greedy_choice_out_of_best": false,
+
+    "train_size_final": 1.0,
+    "n_epochs_final": 125,
+    "lr_start_final": 0.025,
+    "lr_end_final": 1e-3,
+    "weight_decay": 3e-4,
+    "auxiliary_loss_weight": 0.4,
+    "batch_size_final": 96,
+    "optimizer": "SGD",
+    "dataset_name": "FashionMNIST",
+    "max_per_gpu": 5,
+
+    "final_dataset_path": "datasets/final_dataset/",
+    "evaluate_ensemble_flag": true,
+    "n_models_to_evaluate": 2000,
+    "output_path": "output/",
+    "n_ece_bins": 16,
+    "num_cells": 3,
+    "width": 16
+}
