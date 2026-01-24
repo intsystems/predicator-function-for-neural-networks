@@ -1,11 +1,11 @@
 {
     "seed": 42,
     "num_workers": 20,
-    "dataset_path": "datasets/CIFAR100_united/architectures",
-    "acc_dataset_path": "datasets/CIFAR100_united/architectures",
-    "div_dataset_path": "datasets/CIFAR100_div/architectures",
+    "dataset_path": "/home/alexander/RAS/m1p/predicator-function-for-neural-networks/code/datasets/CIFAR100_united/architectures",
+    "acc_dataset_path": "/home/alexander/RAS/m1p/predicator-function-for-neural-networks/code/datasets/CIFAR100_united/architectures",
+    "div_dataset_path": "/home/alexander/RAS/m1p/predicator-function-for-neural-networks/code/datasets/CIFAR100_united/architectures",
 
-    "device": "cuda:0",
+    "device": "cpu",
     "developer_mode": false,
 
     "n_models": 2925,
@@ -18,7 +18,7 @@
     "batch_size": 64,
     "input_dim": 8,
 
-    "acc_num_epochs": 100,
+    "acc_num_epochs": 1,
     "acc_lr_start": 1e-3,
     "acc_lr_end": 1e-4,
     "acc_dropout": 0.1,
@@ -32,7 +32,7 @@
     "margin": 1,
     "div_output_dim": 16,
 
-    "surrogate_inference_path": "surrogate_models/",
+    "surrogate_inference_path": "/home/alexander/RAS/m1p/predicator-function-for-neural-networks/code/surrogate_models/",
 
     "use_pretrained_models_for_ensemble": false,
     "n_ensemble_models": 5,
