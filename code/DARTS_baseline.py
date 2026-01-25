@@ -65,16 +65,41 @@ class DartsArchitectureSelector(DiversityNESRunner):
         
         module._get_result_for_report = lambda: patched_get_result(module)
 
+        trainer=Trainer(
+            max_epochs=self.config.n_epochs_final,
+            fast_dev_run=self.config.developer_mode,
+
+            accelerator=accelerator,
+            devices=devices_arg,
+
+            logger=tb_logger,
+
+            enable_progress_bar=True,
+
+            # 🔽 КРИТИЧНО
+            enable_checkpointing=True,
+            enable_model_summary=True,
+
+            # 🔽 ВАЖНО: принудительное включение валидации
+            check_val_every_n_epoch=1,
+            val_check_interval=1.0,
+
+            # 🔽 важно для NAS + Lightning связки
+            num_sanity_val_steps=0,
+        )
+
+        # trainer=Trainer(
+        #         max_epochs=self.config.n_epochs_final,
+        #         fast_dev_run=self.config.developer_mode,
+        #         accelerator=accelerator,
+        #         devices=devices_arg,
+        #         enable_progress_bar=True,
+        #         logger=tb_logger,
+        #     )
+
         evaluator = Lightning(
             module,
-            trainer=Trainer(
-                max_epochs=self.config.n_epochs_final,
-                fast_dev_run=self.config.developer_mode,
-                accelerator=accelerator,
-                devices=devices_arg,
-                enable_progress_bar=True,
-                logger=tb_logger,
-            ),
+            trainer=trainer,
             train_dataloaders=train_loader,
             val_dataloaders=valid_loader,
         )
