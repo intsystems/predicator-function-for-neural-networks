@@ -32,7 +32,7 @@
     "margin": 1,
     "div_output_dim": 16,
 
-    "surrogate_inference_path": "/home/alexander/RAS/m1p/predicator-function-for-neural-networks/code/surrogate_models",
+    "surrogate_inference_path": "/home/alexander/RAS/m1p/predicator-function-for-neural-networks/code/results/surrogates/CIFAR10",
 
     "use_pretrained_models_for_ensemble": false,
     "n_ensemble_models": 5,

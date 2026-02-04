@@ -76,15 +76,12 @@ class DartsArchitectureSelector(DiversityNESRunner):
 
             enable_progress_bar=True,
 
-            # 🔽 КРИТИЧНО
             enable_checkpointing=True,
             enable_model_summary=True,
 
-            # 🔽 ВАЖНО: принудительное включение валидации
             check_val_every_n_epoch=1,
             val_check_interval=1.0,
 
-            # 🔽 важно для NAS + Lightning связки
             num_sanity_val_steps=0,
         )
 
