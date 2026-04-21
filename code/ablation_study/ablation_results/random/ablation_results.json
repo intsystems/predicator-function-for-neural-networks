@@ -1,0 +1,162 @@
+[
+  {
+    "n_models": 100,
+    "n_recent_models": 100,
+    "metrics": {
+      "mean_accuracy": 37.43415,
+      "top_k_overlap": 0.01,
+      "top_100_fraction": 0.01,
+      "n_models": 100
+    },
+    "metrics_recent": {
+      "mean_accuracy": 37.43415,
+      "top_k_overlap": 0.01,
+      "top_100_fraction": 0.01,
+      "n_models": 100
+    }
+  },
+  {
+    "n_models": 200,
+    "n_recent_models": 100,
+    "metrics": {
+      "mean_accuracy": 37.50985,
+      "top_k_overlap": 0.025,
+      "top_100_fraction": 0.015,
+      "n_models": 200
+    },
+    "metrics_recent": {
+      "mean_accuracy": 37.58555,
+      "top_k_overlap": 0.02,
+      "top_100_fraction": 0.02,
+      "n_models": 100
+    }
+  },
+  {
+    "n_models": 300,
+    "n_recent_models": 100,
+    "metrics": {
+      "mean_accuracy": 37.569741666666665,
+      "top_k_overlap": 0.09,
+      "top_100_fraction": 0.02,
+      "n_models": 300
+    },
+    "metrics_recent": {
+      "mean_accuracy": 37.689524999999996,
+      "top_k_overlap": 0.03,
+      "top_100_fraction": 0.03,
+      "n_models": 100
+    }
+  },
+  {
+    "n_models": 400,
+    "n_recent_models": 100,
+    "metrics": {
+      "mean_accuracy": 37.5521625,
+      "top_k_overlap": 0.11,
+      "top_100_fraction": 0.0175,
+      "n_models": 400
+    },
+    "metrics_recent": {
+      "mean_accuracy": 37.499424999999995,
+      "top_k_overlap": 0.01,
+      "top_100_fraction": 0.01,
+      "n_models": 100
+    }
+  },
+  {
+    "n_models": 500,
+    "n_recent_models": 100,
+    "metrics": {
+      "mean_accuracy": 37.576359999999994,
+      "top_k_overlap": 0.166,
+      "top_100_fraction": 0.018,
+      "n_models": 500
+    },
+    "metrics_recent": {
+      "mean_accuracy": 37.67314999999999,
+      "top_k_overlap": 0.02,
+      "top_100_fraction": 0.02,
+      "n_models": 100
+    }
+  },
+  {
+    "n_models": 600,
+    "n_recent_models": 100,
+    "metrics": {
+      "mean_accuracy": 37.595329166666666,
+      "top_k_overlap": 0.195,
+      "top_100_fraction": 0.021666666666666667,
+      "n_models": 600
+    },
+    "metrics_recent": {
+      "mean_accuracy": 37.690174999999996,
+      "top_k_overlap": 0.04,
+      "top_100_fraction": 0.04,
+      "n_models": 100
+    }
+  },
+  {
+    "n_models": 700,
+    "n_recent_models": 100,
+    "metrics": {
+      "mean_accuracy": 37.58445,
+      "top_k_overlap": 0.22285714285714286,
+      "top_100_fraction": 0.022857142857142857,
+      "n_models": 700
+    },
+    "metrics_recent": {
+      "mean_accuracy": 37.519175000000004,
+      "top_k_overlap": 0.03,
+      "top_100_fraction": 0.03,
+      "n_models": 100
+    }
+  },
+  {
+    "n_models": 800,
+    "n_recent_models": 100,
+    "metrics": {
+      "mean_accuracy": 37.58715625,
+      "top_k_overlap": 0.2625,
+      "top_100_fraction": 0.02375,
+      "n_models": 800
+    },
+    "metrics_recent": {
+      "mean_accuracy": 37.60609999999999,
+      "top_k_overlap": 0.03,
+      "top_100_fraction": 0.03,
+      "n_models": 100
+    }
+  },
+  {
+    "n_models": 900,
+    "n_recent_models": 100,
+    "metrics": {
+      "mean_accuracy": 37.595536111111116,
+      "top_k_overlap": 0.2966666666666667,
+      "top_100_fraction": 0.021111111111111112,
+      "n_models": 900
+    },
+    "metrics_recent": {
+      "mean_accuracy": 37.662575000000004,
+      "top_k_overlap": 0.0,
+      "top_100_fraction": 0.0,
+      "n_models": 100
+    }
+  },
+  {
+    "n_models": 1000,
+    "n_recent_models": 100,
+    "metrics": {
+      "mean_accuracy": 37.606435,
+      "top_k_overlap": 0.331,
+      "top_100_fraction": 0.02,
+      "n_models": 1000
+    },
+    "metrics_recent": {
+      "mean_accuracy": 37.704525,
+      "top_k_overlap": 0.01,
+      "top_100_fraction": 0.01,
+      "n_models": 100
+    }
+  }
+]
