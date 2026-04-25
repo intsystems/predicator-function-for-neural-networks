@@ -333,28 +333,44 @@ class CustomDataset(Dataset):
         adj, features = CustomDataset.preprocess(adj, features)
         return graph.index, adj, features
 
-    def __init__(self, models_dict_path, accuracies=None, use_tqdm=False):
-        self.models_dict_path = models_dict_path
-
+    def __init__(self, models_dict_path, accuracies=None, use_tqdm=False, preload=False):
+        self.models_dict_path = [Path(path) for path in models_dict_path]
         self.accuracies = (
             torch.tensor(accuracies, dtype=torch.float)
             if accuracies is not None
             else None
         )
+        self._cache = {}
 
-    def __getitem__(self, index):
+        if preload:
+            iterator = range(len(self.models_dict_path))
+            if use_tqdm:
+                iterator = tqdm(iterator, desc="Preloading graphs", leave=False)
+            for index in iterator:
+                self._cache[index] = self._build_data(index)
+
+    def _build_data(self, index):
         path = self.models_dict_path[index]
         with path.open("r", encoding="utf-8") as f:
             model_dict = json.load(f)
+
         graph = Graph(model_dict, index=index)
         _, adj, features = self.process_graph(graph)
         edge_index, _ = dense_to_sparse(adj)
 
         data = Data(x=features, edge_index=edge_index)
         data.index = index
+        data.sample_id = torch.tensor([index], dtype=torch.long)
+        data.dataset_position = index
+        data.source_path = str(path)
         if self.accuracies is not None:
             data.y = self.accuracies[index]
         return data
+
+    def __getitem__(self, index):
+        if index not in self._cache:
+            self._cache[index] = self._build_data(index)
+        return self._cache[index].clone()
 
     def __len__(self):
         return len(self.models_dict_path)
@@ -369,46 +385,42 @@ class TripletGraphDataset(Dataset):
         self.base = base_dataset
         self.div = diversity_matrix
         self.N = len(self.base)
-
-        # Building a display of the original index -> internal
-        # example: if base_dataset[5].index == 42, then orig2int[42] = 5
         self.orig2int = {self.base[i].index: i for i in range(self.N)}
+        self.valid_anchor_positions = self._build_valid_anchor_positions()
+
+    def _build_valid_anchor_positions(self):
+        valid_positions = []
+        for pos in range(self.N):
+            anchor_orig = self.base[pos].index
+            row = self.div[anchor_orig]
+            pos_orig = np.where((row == 1) & (np.arange(len(row)) != anchor_orig))[0]
+            neg_orig = np.where(row == -1)[0]
+            pos_orig = [i for i in pos_orig if i in self.orig2int]
+            neg_orig = [i for i in neg_orig if i in self.orig2int]
+            if pos_orig and neg_orig:
+                valid_positions.append(pos)
+        return valid_positions
 
     def __len__(self):
-        return self.N
+        return len(self.valid_anchor_positions)
 
     def __getitem__(self, idx):
-        # 1) Get Data and its original index
-        anchor = self.base[idx]
-        anchor_orig = anchor.index  # in range [0, M-1]
+        anchor_pos = self.valid_anchor_positions[idx]
+        anchor = self.base[anchor_pos]
+        anchor_orig = anchor.index
 
-        # 2) Get the row of diversity_matrix by the original index
-        row = self.div[anchor_orig]  # length M
-
-        # 3) Find original indices of positive and negative examples
+        row = self.div[anchor_orig]
         pos_orig = np.where((row == 1) & (np.arange(len(row)) != anchor_orig))[0]
         neg_orig = np.where(row == -1)[0]
-
-        # 4) Filter by presence in self.orig2int
         pos_orig = [i for i in pos_orig if i in self.orig2int]
         neg_orig = [i for i in neg_orig if i in self.orig2int]
 
-        # 5) Check for at least one positive and negative example
-        if len(pos_orig) == 0 or len(neg_orig) == 0:
-            raise IndexError(f"No valid pos/neg for original index {anchor_orig}")
-
-        # 6) Randomly select appropriate indices
         pos_o = int(np.random.choice(pos_orig))
         neg_o = int(np.random.choice(neg_orig))
 
-        # 7) Convert to internal indices and get Data
-        pos_int = self.orig2int[pos_o]
-        neg_int = self.orig2int[neg_o]
+        positive = self.base[self.orig2int[pos_o]]
+        negative = self.base[self.orig2int[neg_o]]
 
-        positive = self.base[pos_int]
-        negative = self.base[neg_int]
-
-        # 8) Return three Data and a tensor of original indices
         idx_triplet = torch.tensor([anchor_orig, pos_o, neg_o], dtype=torch.long)
         return anchor, positive, negative, idx_triplet
 
@@ -827,7 +839,10 @@ def extract_embeddings(model, data_loader, device, use_tqdm=True):
             batch_embeddings = model(batch.x, batch.edge_index, batch.batch)
 
             embeddings.append(batch_embeddings.cpu().numpy())
-            indices.append(batch.index.cpu().numpy())
+            sample_ids = getattr(batch, "sample_id", None)
+            if sample_ids is None:
+                sample_ids = batch.index
+            indices.append(sample_ids.view(-1).cpu().numpy())
 
     embeddings = np.vstack(embeddings).squeeze()
     indices = np.concatenate(indices)

@@ -29,14 +29,17 @@ matplotlib.rcParams.update({
     'ytick.major.width': 1.2,
 })
 
-# Определяем три конфига
 config_paths = [
-    "/home/alexander/RAS/m1p/predicator-function-for-neural-networks/code/configs/surrogate_hp_fashionmnist.json",
-    "/home/alexander/RAS/m1p/predicator-function-for-neural-networks/code/configs/surrogate_hp_CIFAR10.json",
+    # "/home/alexander/RAS/m1p/predicator-function-for-neural-networks/code/configs/surrogate_hp_fashionmnist.json",
+    # "/home/alexander/RAS/m1p/predicator-function-for-neural-networks/code/configs/surrogate_hp_CIFAR10.json",
     "/home/alexander/RAS/m1p/predicator-function-for-neural-networks/code/configs/surrogate_hp_CIFAR100.json"
 ]
 
-dataset_names = ["FashionMNIST", "CIFAR-10", "CIFAR-100"]
+dataset_names = [
+    # "FashionMNIST",
+    # "CIFAR-10",
+    "CIFAR-100"
+    ]
 
 # Импортируем необходимые модули
 try:

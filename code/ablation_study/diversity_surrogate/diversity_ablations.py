@@ -1,20 +1,38 @@
-import numpy as np
-import matplotlib.pyplot as plt
+import argparse
+import copy
 import json
-from pathlib import Path
 import re
-from scipy.stats import spearmanr, kendalltau, sem, t
 import sys
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
 import matplotlib
-import torch
-
-# Добавляем путь к проекту для импорта модулей
-sys.path.insert(1, "../")
-
-# Устанавливаем неинтерактивный бэкенд для избежания проблем с Qt
 matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+import torch.nn.functional as F
+from scipy.stats import kendalltau, spearmanr
+from torch.utils.data import DataLoader, Dataset
+from tqdm.auto import tqdm
 
-# Устанавливаем стиль для публикацию
+# Добавляем путь к корню проекта для импорта модулей
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(1, str(PROJECT_ROOT))
+
+from dependencies.GCN import (
+    GAT_ver_2,
+    CustomDataset,
+    collate_graphs,
+    collate_triplets,
+    extract_embeddings,
+    train_model_diversity,
+)
+from dependencies.data_generator import load_dataset
+from dependencies.train_config import TrainConfig
+from train_surrogate import SurrogateTrainer
+
 plt.style.use("seaborn-v0_8-whitegrid")
 matplotlib.rcParams.update(
     {
@@ -32,23 +50,442 @@ matplotlib.rcParams.update(
     }
 )
 
-try:
-    from dependencies.data_generator import load_dataset, load_dataset_on_inference
-    from dependencies.train_config import TrainConfig
-    from train_surrogate import SurrogateTrainer
-    from inference_surrogate import InferSurrogate
-    from dependencies.GCN import GAT_ver_2
-    from tqdm.auto import tqdm
-except ImportError as e:
-    print(f"Ошибка импорта: {e}")
-    print("Убедитесь, что вы запускаете скрипт из правильной директории")
-    sys.exit(1)
+DEFAULT_CONFIG_PATH = PROJECT_ROOT / "configs/surrogate_hp_CIFAR100.json"
+DEFAULT_OUTPUT_BASE = PROJECT_ROOT / "ablation_study/diversity_surrogate/results"
+DEFAULT_PLOTS_DIR = PROJECT_ROOT / "ablation_study/diversity_surrogate/correlation_analysis"
+DEFAULT_MATRIX_CACHE_PATH = PROJECT_ROOT / "ablation_study/diversity_surrogate/diversity_matrix_cache.npz"
 
-CONFIG_PATH = "/home/alexander/RAS/m1p/predicator-function-for-neural-networks/code/configs/surrogate_hp_CIFAR100.json"
+def parse_arguments():
+    parser = argparse.ArgumentParser(description="Diversity surrogate ablation study")
+    parser.add_argument(
+        "--hyperparameters_json",
+        type=str,
+        default=str(DEFAULT_CONFIG_PATH),
+    )
+    parser.add_argument(
+        "--model_counts",
+        type=int,
+        nargs="+",
+        default=[0, 2000, 1500, 1000, 500, 250],
+        help="Explicit cumulative model counts to train/evaluate",
+    )
+    parser.add_argument(
+        "--skip_existing",
+        action="store_true",
+        help="Load existing checkpoints if present",
+    )
+    parser.add_argument(
+        "--output_base",
+        type=str,
+        default=str(DEFAULT_OUTPUT_BASE),
+        help="Directory for diversity checkpoints and JSON results",
+    )
+    parser.add_argument(
+        "--plots_dir",
+        type=str,
+        default=str(DEFAULT_PLOTS_DIR),
+        help="Directory for plots",
+    )
+    parser.add_argument(
+        "--matrix_cache_path",
+        type=str,
+        default=str(DEFAULT_MATRIX_CACHE_PATH),
+        help="Path to cached diversity matrices (.npz)",
+    )
+    parser.add_argument(
+        "--n_pairs",
+        type=int,
+        default=1000,
+        help="Number of test-test pairs for correlation evaluation",
+    )
+    return parser.parse_args()
+
+
+class IndexedSubsetDataset(Dataset):
+    def __init__(
+        self,
+        base_paths: List[Path],
+        indices: List[int],
+        accuracies: np.ndarray,
+        preload: bool = False,
+    ):
+        self.base_paths = base_paths
+        self.indices = list(indices)
+        self.accuracies = accuracies
+        self._cache: Dict[int, object] = {}
+
+        if preload:
+            for idx in tqdm(range(len(self.indices)), desc="Preloading graphs", leave=False):
+                self._cache[idx] = self._build_data(idx)
+
+    def __len__(self):
+        return len(self.indices)
+
+    def _build_data(self, idx):
+        original_idx = self.indices[idx]
+        path = self.base_paths[original_idx]
+        with path.open("r", encoding="utf-8") as f:
+            model_dict = json.load(f)
+
+        parsed_model_id = None
+        match = re.search(r"model_(\d+)", str(path))
+        if match:
+            parsed_model_id = int(match.group(1))
+
+        from dependencies.Graph import Graph
+        from torch_geometric.utils import dense_to_sparse
+        from torch_geometric.data import Data
+
+        graph = Graph(model_dict, index=original_idx)
+        adj, _, features = graph.get_adjacency_matrix()
+        adj, features = CustomDataset.preprocess(adj, features)
+        edge_index, _ = dense_to_sparse(adj)
+
+        data = Data(x=features, edge_index=edge_index)
+        data.index = original_idx
+        data.sample_id = torch.tensor([original_idx], dtype=torch.long)
+        data.dataset_position = idx
+        data.path_position = original_idx
+        data.parsed_model_id = -1 if parsed_model_id is None else parsed_model_id
+        data.source_path = str(path)
+        data.y = torch.tensor(self.accuracies[original_idx], dtype=torch.float)
+        return data
+
+    def __getitem__(self, idx):
+        if idx not in self._cache:
+            self._cache[idx] = self._build_data(idx)
+        return self._cache[idx].clone()
+
+
+class IndexedTripletDataset(Dataset):
+    def __init__(self, base_dataset: IndexedSubsetDataset, diversity_matrix: np.ndarray):
+        self.base = base_dataset
+        self.div = diversity_matrix
+        self.N = len(self.base)
+        self.orig2int = {self.base.indices[i]: i for i in range(self.N)}
+        self.valid_anchor_positions = self._build_valid_anchor_positions()
+
+    def _build_valid_anchor_positions(self) -> List[int]:
+        valid_positions = []
+        for pos, anchor_orig in enumerate(self.base.indices):
+            row = self.div[anchor_orig]
+            pos_orig = np.where((row == 1) & (np.arange(len(row)) != anchor_orig))[0]
+            neg_orig = np.where(row == -1)[0]
+            pos_orig = [i for i in pos_orig if i in self.orig2int]
+            neg_orig = [i for i in neg_orig if i in self.orig2int]
+            if pos_orig and neg_orig:
+                valid_positions.append(pos)
+        return valid_positions
+
+    def __len__(self):
+        return len(self.valid_anchor_positions)
+
+    def __getitem__(self, idx):
+        anchor_pos = self.valid_anchor_positions[idx]
+        anchor = self.base[anchor_pos]
+        anchor_orig = self.base.indices[anchor_pos]
+
+        row = self.div[anchor_orig]
+        pos_orig = np.where((row == 1) & (np.arange(len(row)) != anchor_orig))[0]
+        neg_orig = np.where(row == -1)[0]
+        pos_orig = [i for i in pos_orig if i in self.orig2int]
+        neg_orig = [i for i in neg_orig if i in self.orig2int]
+
+        pos_o = int(np.random.choice(pos_orig))
+        neg_o = int(np.random.choice(neg_orig))
+
+        positive = self.base[self.orig2int[pos_o]]
+        negative = self.base[self.orig2int[neg_o]]
+        idx_triplet = torch.tensor([anchor_orig, pos_o, neg_o], dtype=torch.long)
+        return anchor, positive, negative, idx_triplet
+
+
+class DiversityAblationTrainer:
+    def __init__(self, config: TrainConfig):
+        self.config = config
+        self.device = torch.device(config.device)
+        self.dataset_path = Path(config.dataset_path)
+        self.all_model_paths: List[Path] = []
+        self.all_accuracies: Optional[np.ndarray] = None
+        self.initial_archs: List[Dict] = []
+        self.diversity_matrix: Optional[np.ndarray] = None
+        self.discrete_diversity_matrix: Optional[np.ndarray] = None
+        self.train_indices: List[int] = []
+        self.test_indices: List[int] = []
+        self.test_test_pairs: List[Tuple[int, int]] = []
+
+    def load_all_models(self) -> None:
+        load_dataset(self.config)
+        self.all_model_paths = sorted(self.dataset_path.rglob("*.json"))
+        self.config.models_dict_path = list(self.all_model_paths)
+        self.config.div_models_dict_path = list(self.all_model_paths)
+        self.config.acc_models_dict_path = list(self.all_model_paths)
+
+        print(f"Total models available: {len(self.all_model_paths)}")
+        self.initial_archs = []
+        accuracies = []
+
+        for arch_json_path in tqdm(self.all_model_paths, desc="Loading pretrained archs"):
+            arch = json.loads(arch_json_path.read_text(encoding="utf-8"))
+            accuracies.append(arch.get("valid_accuracy", arch.get("test_accuracy", 0.0)) * 100)
+            for key in (
+                "test_predictions",
+                "test_accuracy",
+                "valid_predictions",
+                "valid_accuracy",
+            ):
+                arch.pop(key, None)
+            arch["id"] = int(re.search(r"model_(\d+)", str(arch_json_path)).group(1))
+            self.initial_archs.append(arch)
+
+        self.all_accuracies = np.array(accuracies, dtype=float)
+
+    def prepare_common_data(
+        self,
+        n_pairs: int = 1000,
+        random_seed: int = 42,
+        matrix_cache_path: Optional[Path] = None,
+    ) -> None:
+        cache_path = Path(matrix_cache_path) if matrix_cache_path else None
+
+        if cache_path and cache_path.exists():
+            print(f"\nLoading diversity matrix from cache: {cache_path}")
+            cached = np.load(cache_path)
+            self.diversity_matrix = cached["diversity_matrix"]
+            self.discrete_diversity_matrix = cached["discrete_diversity_matrix"]
+        else:
+            print("\nComputing diversity matrix once...")
+            trainer = SurrogateTrainer(self.config)
+            trainer.get_diversity_matrix()
+            trainer.create_discrete_diversity_matrix()
+            self.diversity_matrix = trainer.config.diversity_matrix
+            self.discrete_diversity_matrix = trainer.config.discrete_diversity_matrix
+
+            if cache_path:
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                np.savez_compressed(
+                    cache_path,
+                    diversity_matrix=self.diversity_matrix,
+                    discrete_diversity_matrix=self.discrete_diversity_matrix,
+                )
+                print(f"Saved diversity matrix cache to: {cache_path}")
+
+        print(f"Diversity matrix shape: {self.diversity_matrix.shape}")
+
+        indices = np.arange(len(self.all_model_paths))
+        np.random.seed(random_seed)
+        np.random.shuffle(indices)
+        np.random.seed(None)
+
+        train_size = int(0.8 * len(indices))
+        self.train_indices = list(indices[:train_size])
+        self.test_indices = list(indices[train_size:])
+        print(f"Train pool size: {len(self.train_indices)}")
+        print(f"Test pool size: {len(self.test_indices)}")
+
+        max_test_pairs = len(self.test_indices) * (len(self.test_indices) - 1) // 2
+        actual_n_pairs = min(n_pairs, max_test_pairs)
+        self.test_test_pairs = get_random_pairs(self.test_indices, self.test_indices, actual_n_pairs)
+        print(f"Created {len(self.test_test_pairs)} test-test pairs")
+
+    def create_subset_dataset(
+        self,
+        indices: List[int],
+        preload: bool = False,
+    ) -> IndexedSubsetDataset:
+        return IndexedSubsetDataset(
+            self.all_model_paths,
+            indices,
+            self.all_accuracies,
+            preload=preload,
+        )
+
+    def create_triplet_dataloaders(self, indices: List[int]):
+        subset_dataset = self.create_subset_dataset(indices, preload=True)
+        subset_triplet_dataset = IndexedTripletDataset(subset_dataset, self.discrete_diversity_matrix)
+
+        if len(subset_triplet_dataset) == 0:
+            raise ValueError(
+                f"No valid triplets can be formed for subset of size {len(indices)}"
+            )
+
+        valid_triplet_count = max(1, int(round((1 - self.config.train_size) * len(subset_triplet_dataset))))
+        train_triplet_count = len(subset_triplet_dataset) - valid_triplet_count
+        if train_triplet_count <= 0:
+            train_triplet_count = len(subset_triplet_dataset) - 1
+            valid_triplet_count = 1
+
+        train_triplet_ds, valid_triplet_ds = torch.utils.data.random_split(
+            subset_triplet_dataset,
+            [train_triplet_count, valid_triplet_count],
+        )
+
+        loader_kwargs = {
+            "num_workers": self.config.num_workers,
+            "pin_memory": self.device.type == "cuda",
+            "collate_fn": collate_triplets,
+        }
+        if self.config.num_workers > 0:
+            loader_kwargs["persistent_workers"] = True
+            loader_kwargs["prefetch_factor"] = 2
+
+        print(
+            "[triplet_dataloader] "
+            f"subset_size={len(indices)}, "
+            f"triplets={len(subset_triplet_dataset)}, "
+            f"train_triplets={train_triplet_count}, "
+            f"valid_triplets={valid_triplet_count}, "
+            f"num_workers={loader_kwargs['num_workers']}, "
+            f"pin_memory={loader_kwargs['pin_memory']}, "
+            f"persistent_workers={loader_kwargs.get('persistent_workers', False)}, "
+            f"prefetch_factor={loader_kwargs.get('prefetch_factor', 'n/a')}"
+        )
+
+        train_loader = DataLoader(
+            train_triplet_ds,
+            batch_size=self.config.batch_size,
+            shuffle=True,
+            **loader_kwargs,
+        )
+        valid_loader = DataLoader(
+            valid_triplet_ds,
+            batch_size=1024,
+            shuffle=False,
+            **loader_kwargs,
+        )
+        return train_loader, valid_loader
+
+    def build_diversity_model(self):
+        return GAT_ver_2(
+            self.config.input_dim,
+            self.config.div_output_dim,
+            dropout=self.config.div_dropout,
+            heads=self.config.div_n_heads,
+            output_activation="l2",
+            pre_norm=True,
+        ).to(self.device)
+
+    def train_diversity_model(self, indices: List[int]):
+        model = self.build_diversity_model()
+        print(
+            "[train_diversity_model] "
+            f"indices_count={len(indices)}, "
+            f"device={self.device}, "
+            f"batch_size={self.config.batch_size}, "
+            f"num_workers={self.config.num_workers}"
+        )
+        train_loader, valid_loader = self.create_triplet_dataloaders(indices)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=self.config.div_lr_start)
+        train_model_diversity(
+            model=model,
+            train_loader=train_loader,
+            valid_loader=valid_loader,
+            optimizer=optimizer,
+            criterion=lambda a, p, n: self._triplet_loss(a, p, n),
+            num_epochs=self.config.div_num_epochs,
+            device=self.device,
+            developer_mode=self.config.developer_mode,
+            final_lr=self.config.div_lr_end,
+        )
+        model.eval()
+        return model
+
+    def load_diversity_model(self, checkpoint_path: Path):
+        model = self.build_diversity_model()
+        state_dict = torch.load(checkpoint_path, map_location=self.device, weights_only=True)
+        model.load_state_dict(state_dict)
+        model.eval()
+        return model
+
+    @staticmethod
+    def save_diversity_model(model, save_dir: Path) -> None:
+        save_dir.mkdir(parents=True, exist_ok=True)
+        torch.save(model.state_dict(), save_dir / "model_diversity.pth")
+
+    def compute_embeddings_for_model(self, model_diversity):
+        dataset = self.create_subset_dataset(
+            list(range(len(self.all_model_paths))),
+            preload=True,
+        )
+        loader_kwargs = {
+            "num_workers": self.config.num_workers,
+            "pin_memory": self.device.type == "cuda",
+            "collate_fn": collate_graphs,
+        }
+        if self.config.num_workers > 0:
+            loader_kwargs["persistent_workers"] = True
+            loader_kwargs["prefetch_factor"] = 2
+
+        loader = DataLoader(
+            dataset,
+            batch_size=self.config.batch_size_inference,
+            shuffle=False,
+            **loader_kwargs,
+        )
+
+        embs_np, indices = extract_embeddings(model_diversity, loader, self.device, use_tqdm=True)
+        ordered_embs = np.zeros((len(self.all_model_paths), embs_np.shape[-1]), dtype=embs_np.dtype)
+
+        if len(indices) != len(embs_np):
+            raise ValueError(
+                "Embedding extraction length mismatch: "
+                f"len(indices)={len(indices)}, len(embs)={len(embs_np)}"
+            )
+
+        invalid_mask = (indices < 0) | (indices >= len(self.all_model_paths))
+        if np.any(invalid_mask):
+            invalid_indices = indices[invalid_mask]
+            raise IndexError(
+                "Embedding sample ids exceed available model paths. "
+                f"sample={invalid_indices[:10].tolist()}, "
+                f"allowed_range=[0, {len(self.all_model_paths) - 1}]"
+            )
+
+        ordered_embs[indices] = embs_np
+        return ordered_embs
+
+    def evaluate_embeddings(self, embs_np):
+        similarities = []
+        distances = []
+        for i, j in self.test_test_pairs:
+            similarities.append(self.diversity_matrix[i, j])
+            distances.append(np.linalg.norm(embs_np[i] - embs_np[j]))
+
+        similarities = np.array(similarities)
+        distances = np.array(distances)
+        spearman_corr, spearman_p = spearmanr(distances, similarities)
+        kendall_corr, kendall_p = kendalltau(distances, similarities)
+        recall_metrics = compute_recall_at_k_for_model(
+            embs_np,
+            self.diversity_matrix,
+            self.test_indices,
+            k_values=(10, 50, 100),
+        )
+        return {
+            "spearman_corr": float(spearman_corr),
+            "spearman_p": float(spearman_p),
+            "kendall_corr": float(kendall_corr),
+            "kendall_p": float(kendall_p),
+            "recall_at_10": float(recall_metrics["recall_at_10"]),
+            "recall_at_50": float(recall_metrics["recall_at_50"]),
+            "recall_at_100": float(recall_metrics["recall_at_100"]),
+            "recall_at_10_per_query": recall_metrics["recall_at_10_per_query"].tolist(),
+            "recall_at_50_per_query": recall_metrics["recall_at_50_per_query"].tolist(),
+            "recall_at_100_per_query": recall_metrics["recall_at_100_per_query"].tolist(),
+            "distances": distances.tolist(),
+            "similarities": similarities.tolist(),
+        }
+
+    def _triplet_loss(self, a: torch.Tensor, p: torch.Tensor, n: torch.Tensor) -> torch.Tensor:
+        d_ap = (a - p).pow(2).sum(-1)
+        d_an = (a - n).pow(2).sum(-1)
+        return F.relu(d_ap - d_an + self.config.margin).mean()
+
+
 
 
 def get_random_pairs(indices1, indices2, n_pairs):
-    """Создает список уникальных пар индексов (i, j), где i != j"""
+    """Создает список уникальных пар индексов (i, j), где i != j."""
     pairs = set()
     while len(pairs) < n_pairs:
         i = np.random.choice(indices1)
@@ -58,362 +495,122 @@ def get_random_pairs(indices1, indices2, n_pairs):
     return list(pairs)
 
 
-def load_single_model(model_path, config):
-    """Загружает diversity модель из checkpoint."""
-    model = GAT_ver_2(
-        config.input_dim,
-        config.div_output_dim,
-        dropout=config.div_dropout,
-        heads=config.div_n_heads,
-        output_activation="l2",
-        pre_norm=True,
-    ).to(config.device)
-
-    state_dict = torch.load(model_path, map_location=config.device, weights_only=True)
-    model.load_state_dict(state_dict)
-    model.eval()
-    return model
-
-
-def compute_embeddings_for_model(
-    model_diversity, config, initial_archs, model_accuracy=None
-):
-    """Вычисляет эмбеддинги для одной модели diversity."""
-    inference = InferSurrogate(config)
-    inference.model_diversity = model_diversity
-
-    # Используем переданную accuracy модель или загружаем новую
-    if model_accuracy is not None:
-        inference.model_accuracy = model_accuracy
-    else:
-        inference.model_accuracy = GAT_ver_2(
-            config.input_dim,
-            output_dim=1,
-            dropout=config.acc_dropout,
-            heads=config.acc_n_heads,
-            output_activation="none",
-            pre_norm=True,
-            pooling="attn",
-        ).to(config.device)
-
-        state_dict = torch.load(
-            "/home/alexander/RAS/m1p/predicator-function-for-neural-networks/code/results/surrogates/CIFAR100/model_accuracy.pth",
-            map_location=config.device,
-            weights_only=True,
-        )
-        inference.model_accuracy.load_state_dict(state_dict)
-        inference.model_accuracy.eval()
-
-    archs, accs_np, embs_np = inference._get_embeddings(initial_archs)
-    return archs, accs_np, embs_np
-
-
-def compute_correlations_for_model(
-    embs_np, diversity_matrix, test_indices, n_pairs=1000, random_seed=42
-):
-    """
-    Вычисляет корреляции для заданных эмбеддингов и фиксированной матрицы разнообразия.
-    """
-    # Создаем тест-тест пары (фиксированные для всех моделей)
-    max_test_pairs = len(test_indices) * (len(test_indices) - 1) // 2
-    actual_n_pairs = min(n_pairs, max_test_pairs)
-
-    # Фиксируем random seed для воспроизводимости пар
-    np.random.seed(random_seed)
-    test_test_pairs = get_random_pairs(test_indices, test_indices, actual_n_pairs)
-    np.random.seed(None)  # Сбрасываем seed
-
-    # Вычисляем метрики для тест-тест пар
-    similarities = []
-    distances = []
-    for i, j in test_test_pairs:
-        similarities.append(diversity_matrix[i, j])
-        distances.append(np.linalg.norm(embs_np[i] - embs_np[j]))
-
-    similarities = np.array(similarities)
-    distances = np.array(distances)
-
-    spearman_corr, spearman_p = spearmanr(distances, similarities)
-    kendall_corr, kendall_p = kendalltau(distances, similarities)
-
-    return distances, similarities, spearman_corr, spearman_p, kendall_corr, kendall_p
-
-
-def find_model_files(models_dir):
-    """
-    Ищет все .pth файлы в директории.
-    """
-    models_dir = Path(models_dir)
-    pth_files = list(models_dir.rglob("*.pth"))
-
-    # Фильтруем model_accuracy.pth если он есть в путях
-    pth_files = [p for p in pth_files if "model_accuracy" not in p.name]
-
-    return pth_files
-
-
-def load_common_data(config_path, n_pairs=1000, random_seed=42):
-    """
-    Загружает общие данные, которые используются для всех моделей:
-    - конфиг, архитектуры, матрица разнообразия, тестовые индексы
-    """
-    try:
-        print(f"Загрузка конфига: {config_path}")
-        params = json.loads(Path(config_path).read_text())
-        config = TrainConfig(**params)
-
-        print("  Загрузка датасета...")
-        load_dataset(config)
-
-        config.models_dict_path = []
-        config.dataset_path = Path(config.dataset_path)
-        for file_path in config.dataset_path.rglob("*.json"):
-            config.models_dict_path.append(file_path)
-
-        print("  Загрузка архитектур...")
-        initial_archs = []
-        for arch_json_path in tqdm(
-            config.models_dict_path, desc="  Loading pretrained archs"
-        ):
-            arch = json.loads(arch_json_path.read_text(encoding="utf-8"))
-            for key in (
-                "test_predictions",
-                "test_accuracy",
-                "valid_predictions",
-                "valid_accuracy",
-            ):
-                arch.pop(key, None)
-            arch["id"] = int(re.search(r"model_(\d+)", str(arch_json_path)).group(1))
-            initial_archs.append(arch)
-
-        n_archs = len(initial_archs)
-        print(f"  Всего архитектур: {n_archs}")
-
-        # Вычисляем матрицу разнообразия ОДИН РАЗ
-        print("\n  Вычисление матрицы разнообразия...")
-        trainer = SurrogateTrainer(config)
-        trainer.get_diversity_matrix()
-        diversity_matrix = trainer.config.diversity_matrix
-        print(f"  Размер матрицы разнообразия: {diversity_matrix.shape}")
-
-        # Разделяем индексы на train и test ОДИН РАЗ
-        indices = np.arange(n_archs)
-        np.random.seed(random_seed)
-        np.random.shuffle(indices)
-        np.random.seed(None)
-
-        train_size = int(0.8 * n_archs)
-        train_indices = indices[:train_size]
-        test_indices = indices[train_size:]
-        print(f"  Размер тестового набора: {len(test_indices)} архитектур")
-
-        # Создаем тест-тест пары ОДИН РАЗ
-        print("\n  Создание тест-тест пар...")
-        test_test_pairs = get_random_pairs(test_indices, test_indices, n_pairs)
-        print(f"  Создано {len(test_test_pairs)} пар")
-
-        # Загружаем accuracy модель ОДИН РАЗ
-        print("\n  Загрузка accuracy модели...")
-        model_accuracy = GAT_ver_2(
-            config.input_dim,
-            output_dim=1,
-            dropout=config.acc_dropout,
-            heads=config.acc_n_heads,
-            output_activation="none",
-            pre_norm=True,
-            pooling="attn",
-        ).to(config.device)
-
-        state_dict = torch.load(
-            "/home/alexander/RAS/m1p/predicator-function-for-neural-networks/code/results/surrogates/CIFAR100/model_accuracy.pth",
-            map_location=config.device,
-            weights_only=True,
-        )
-        model_accuracy.load_state_dict(state_dict)
-        model_accuracy.eval()
-
-        common_data = {
-            "config": config,
-            "initial_archs": initial_archs,
-            "diversity_matrix": diversity_matrix,
-            "test_indices": test_indices,
-            "test_test_pairs": test_test_pairs,
-            "model_accuracy": model_accuracy,
-            "n_archs": n_archs,
+def compute_recall_at_k_for_model(embs_np, diversity_matrix, test_indices, k_values=(10, 50, 100)):
+    test_indices = np.array(test_indices)
+    if len(test_indices) <= 1:
+        return {f"recall_at_{k}": np.nan for k in k_values} | {
+            f"recall_at_{k}_per_query": np.array([]) for k in k_values
         }
 
-        return common_data
+    max_neighbors = len(test_indices) - 1
+    effective_k_values = [min(k, max_neighbors) for k in k_values]
+    recall_per_k = {k: [] for k in k_values}
 
-    except Exception as e:
-        print(f"  Критическая ошибка при загрузке общих данных: {e}")
-        import traceback
+    for query_idx in test_indices:
+        candidate_indices = test_indices[test_indices != query_idx]
+        true_similarities = diversity_matrix[query_idx, candidate_indices]
+        true_order = candidate_indices[np.argsort(-true_similarities)]
+        latent_distances = np.linalg.norm(embs_np[candidate_indices] - embs_np[query_idx], axis=1)
+        latent_order = candidate_indices[np.argsort(latent_distances)]
 
-        traceback.print_exc()
-        return None
+        for k, effective_k in zip(k_values, effective_k_values):
+            true_topk = set(true_order[:effective_k])
+            latent_topk = set(latent_order[:effective_k])
+            recall_value = len(true_topk & latent_topk) / effective_k
+            recall_per_k[k].append(recall_value)
 
-
-def analyze_single_dataset_with_common_data(
-    common_data, models_dir, model_index_offset=0
-):
-    """
-    Анализирует одну директорию с моделями, используя общие данные.
-    Возвращает список результатов для всех моделей в директории.
-    """
-    try:
-        config = common_data["config"]
-        initial_archs = common_data["initial_archs"]
-        diversity_matrix = common_data["diversity_matrix"]
-        test_indices = common_data["test_indices"]
-        test_test_pairs = common_data["test_test_pairs"]
-        model_accuracy = common_data["model_accuracy"]
-
-        print(f"\nПоиск моделей в: {models_dir}")
-        model_files = find_model_files(models_dir)
-
-        if not model_files:
-            print("Не найдено ни одной модели!")
-            return []
-
-        print(f"Найдено {len(model_files)} моделей")
-
-        results = []
-
-        for idx, model_path in enumerate(tqdm(model_files, desc="Processing models")):
-            try:
-                # Загружаем модель diversity
-                model_diversity = load_single_model(model_path, config)
-
-                # Вычисляем эмбеддинги для этой модели
-                archs, accs_np, embs_np = compute_embeddings_for_model(
-                    model_diversity, config, initial_archs, model_accuracy
-                )
-
-                # Вычисляем корреляции
-                similarities = []
-                distances = []
-                for i, j in test_test_pairs:
-                    similarities.append(diversity_matrix[i, j])
-                    distances.append(np.linalg.norm(embs_np[i] - embs_np[j]))
-
-                similarities = np.array(similarities)
-                distances = np.array(distances)
-
-                spearman_corr, spearman_p = spearmanr(distances, similarities)
-                kendall_corr, kendall_p = kendalltau(distances, similarities)
-
-                results.append(
-                    {
-                        "model_index": model_index_offset + idx,
-                        "model_path": str(model_path),
-                        "spearman_corr": spearman_corr,
-                        "spearman_p": spearman_p,
-                        "kendall_corr": kendall_corr,
-                        "kendall_p": kendall_p,
-                        "distances": distances,
-                        "similarities": similarities,
-                    }
-                )
-
-            except Exception as e:
-                print(f"    Ошибка при обработке модели {model_path}: {e}")
-                continue
-
-        print(f"Успешно обработано моделей: {len(results)}")
-        return results
-
-    except Exception as e:
-        print(f"  Ошибка при анализе директории {models_dir}: {e}")
-        import traceback
-
-        traceback.print_exc()
-        return []
+    result = {}
+    for k in k_values:
+        per_query = np.array(recall_per_k[k], dtype=float)
+        result[f"recall_at_{k}"] = float(np.mean(per_query)) if len(per_query) > 0 else np.nan
+        result[f"recall_at_{k}_per_query"] = per_query
+    return result
 
 
 def compute_mean_and_variance(data):
-    """Вычисляет среднее и дисперсию (стандартное отклонение)."""
     if len(data) < 1:
         return np.nan, np.nan, np.nan
-
     mean = np.mean(data)
     std = np.std(data)
     var = np.var(data)
-
     return mean, std, var
 
 
-def plot_correlation_vs_samples(datasets_results, output_dir="correlation_analysis"):
-    """
-    Строит отдельные графики для коэффициентов Спирмена и Кендалла.
-    Использует fill_between для отображения стандартного отклонения.
-    Все размеры датасетов явно отображаются на оси X.
+def plot_recall_vs_samples(results, output_dir: Path):
+    valid_results = [r for r in results if r.get("metrics")]
+    if not valid_results:
+        print("No valid recall results to plot.")
+        return []
 
-    datasets_results: список кортежей (models_dir, train_size, results)
-    """
-    # Извлекаем данные
-    train_sizes = []
-    spearman_means = []
-    spearman_stds = []
-    kendall_means = []
-    kendall_stds = []
+    train_sizes = np.array([r["n_models"] for r in valid_results])
+    recall10_means = np.array([r["metrics"]["recall_at_10"] for r in valid_results])
+    recall50_means = np.array([r["metrics"]["recall_at_50"] for r in valid_results])
+    recall100_means = np.array([r["metrics"]["recall_at_100"] for r in valid_results])
 
-    for models_dir, train_size, results in datasets_results:
-        if not results:
-            continue
+    recall10_stds = np.zeros_like(recall10_means)
+    recall50_stds = np.zeros_like(recall50_means)
+    recall100_stds = np.zeros_like(recall100_means)
 
-        # Извлекаем коэффициенты корреляции
-        spearman_vals = [r["spearman_corr"] for r in results]
-        kendall_vals = [r["kendall_corr"] for r in results]
+    output_dir.mkdir(parents=True, exist_ok=True)
+    recall_specs = [
+        (10, recall10_means, recall10_stds, "#3C8D2F", "o", output_dir / "recall_at_10_vs_samples.pdf"),
+        (50, recall50_means, recall50_stds, "#E67E22", "s", output_dir / "recall_at_50_vs_samples.pdf"),
+        (100, recall100_means, recall100_stds, "#8E44AD", "^", output_dir / "recall_at_100_vs_samples.pdf"),
+    ]
 
-        # Вычисляем статистики
-        spearman_mean, spearman_std, spearman_var = compute_mean_and_variance(
-            spearman_vals
+    figures = []
+    margin = (train_sizes[-1] - train_sizes[0]) * 0.1 if len(train_sizes) > 1 else 1
+    for k, means, stds, color, marker, output_path in recall_specs:
+        fig, ax = plt.subplots(figsize=(4.5, 3.5))
+        ax.plot(
+            train_sizes,
+            means,
+            f"{marker}-",
+            color=color,
+            linewidth=1.5,
+            markersize=6,
+            markerfacecolor="white",
+            markeredgewidth=1.5,
+            markeredgecolor=color,
         )
-        kendall_mean, kendall_std, kendall_var = compute_mean_and_variance(kendall_vals)
-
-        train_sizes.append(train_size)
-        spearman_means.append(spearman_mean)
-        spearman_stds.append(spearman_std)
-        kendall_means.append(kendall_mean)
-        kendall_stds.append(kendall_std)
-
-        print(f"Размер выборки {train_size}:")
-        print(
-            f"  Spearman: {spearman_mean:.4f} ± {spearman_std:.4f} (var={spearman_var:.6f})"
+        ax.fill_between(
+            train_sizes,
+            np.clip(means - stds, 0.0, 1.0),
+            np.clip(means + stds, 0.0, 1.0),
+            alpha=0.2,
+            color=color,
+            linewidth=0,
         )
-        print(
-            f"  Kendall: {kendall_mean:.4f} ± {kendall_std:.4f} (var={kendall_var:.6f})"
-        )
+        ax.set_xlabel("Training set size", fontsize=12)
+        ax.set_ylabel(f"Recall@{k}", fontsize=12)
+        ax.grid(True, alpha=0.3, linestyle="--", linewidth=0.5)
+        ax.set_xticks(train_sizes)
+        ax.set_xticklabels([str(x) for x in train_sizes])
+        ax.set_xlim(train_sizes[0] - margin, train_sizes[-1] + margin)
+        ax.set_ylim(0, 1)
+        plt.tight_layout()
+        fig.savefig(output_path, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+        figures.append(fig)
+    return figures
 
-    # Сортируем по размеру выборки
-    sorted_indices = np.argsort(train_sizes)
-    train_sizes = np.array(train_sizes)[sorted_indices]
-    spearman_means = np.array(spearman_means)[sorted_indices]
-    spearman_stds = np.array(spearman_stds)[sorted_indices]
-    kendall_means = np.array(kendall_means)[sorted_indices]
-    kendall_stds = np.array(kendall_stds)[sorted_indices]
 
-    # Настройки шрифтов для научной публикации
-    plt.rcParams.update(
-        {
-            "font.family": "serif",
-            "font.serif": ["Times New Roman", "Computer Modern Roman"],
-            "font.size": 11,
-            "axes.labelsize": 12,
-            "xtick.labelsize": 11,
-            "ytick.labelsize": 11,
-            "axes.linewidth": 1.0,
-            "lines.linewidth": 1.5,
-            "lines.markersize": 6,
-            "xtick.major.width": 1.0,
-            "ytick.major.width": 1.0,
-            "xtick.major.size": 4,
-            "ytick.major.size": 4,
-        }
-    )
+def plot_correlation_vs_samples(results, output_dir: Path):
+    valid_results = [r for r in results if r.get("metrics")]
+    if not valid_results:
+        print("No valid correlation results to plot.")
+        return None, None
 
-    # СОЗДАЕМ ОТДЕЛЬНЫЙ ГРАФИК ДЛЯ СПИРМЕНА
+    train_sizes = np.array([r["n_models"] for r in valid_results])
+    spearman_means = np.array([r["metrics"]["spearman_corr"] for r in valid_results])
+    kendall_means = np.array([r["metrics"]["kendall_corr"] for r in valid_results])
+    spearman_stds = np.zeros_like(spearman_means)
+    kendall_stds = np.zeros_like(kendall_means)
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    margin = (train_sizes[-1] - train_sizes[0]) * 0.1 if len(train_sizes) > 1 else 1
+
     fig1, ax1 = plt.subplots(figsize=(4.5, 3.5))
-
     ax1.plot(
         train_sizes,
         (-1) * spearman_means,
@@ -425,43 +622,26 @@ def plot_correlation_vs_samples(datasets_results, output_dir="correlation_analys
         markeredgewidth=1.5,
         markeredgecolor="#2E86AB",
     )
-
     ax1.fill_between(
         train_sizes,
         (-1) * spearman_means - spearman_stds,
-        spearman_means + spearman_stds,
+        (-1) * spearman_means + spearman_stds,
         alpha=0.2,
         color="#2E86AB",
         linewidth=0,
     )
-
     ax1.set_xlabel("Training set size", fontsize=12)
     ax1.set_ylabel(r"$\rho$", fontsize=12)
     ax1.grid(True, alpha=0.3, linestyle="--", linewidth=0.5)
-
-    # КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: явно устанавливаем тики на всех значениях train_sizes
     ax1.set_xticks(train_sizes)
     ax1.set_xticklabels([str(x) for x in train_sizes])
-
-    # Устанавливаем пределы с небольшим отступом
-    margin = (train_sizes[-1] - train_sizes[0]) * 0.1
     ax1.set_xlim(train_sizes[0] - margin, train_sizes[-1] + margin)
     ax1.set_ylim(-1, 0)
-
     plt.tight_layout()
-
-    output_dir = Path(output_dir)
-    output_dir.mkdir(exist_ok=True)
-
-    output_path_spearman = output_dir / "spearman_vs_samples.pdf"
-    fig1.savefig(output_path_spearman, dpi=300, bbox_inches="tight")
-    print(f"\nГрафик Спирмена сохранен: {output_path_spearman}")
-    plt.show()
+    fig1.savefig(output_dir / "spearman_vs_samples.pdf", dpi=300, bbox_inches="tight")
     plt.close(fig1)
 
-    # СОЗДАЕМ ОТДЕЛЬНЫЙ ГРАФИК ДЛЯ КЕНДАЛЛА
     fig2, ax2 = plt.subplots(figsize=(4.5, 3.5))
-
     ax2.plot(
         train_sizes,
         kendall_means,
@@ -473,7 +653,6 @@ def plot_correlation_vs_samples(datasets_results, output_dir="correlation_analys
         markeredgewidth=1.5,
         markeredgecolor="#A23B72",
     )
-
     ax2.fill_between(
         train_sizes,
         kendall_means - kendall_stds,
@@ -482,287 +661,172 @@ def plot_correlation_vs_samples(datasets_results, output_dir="correlation_analys
         color="#A23B72",
         linewidth=0,
     )
-
     ax2.set_xlabel("Training set size", fontsize=12)
     ax2.set_ylabel(r"$\tau$", fontsize=12)
     ax2.grid(True, alpha=0.3, linestyle="--", linewidth=0.5)
-
-    # КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: явно устанавливаем тики на всех значениях train_sizes
     ax2.set_xticks(train_sizes)
     ax2.set_xticklabels([str(x) for x in train_sizes])
-
-    # Устанавливаем пределы с небольшим отступом
     ax2.set_xlim(train_sizes[0] - margin, train_sizes[-1] + margin)
     ax2.set_ylim(-1, 0)
-
     plt.tight_layout()
-
-    output_path_kendall = output_dir / "kendall_vs_samples.pdf"
-    fig2.savefig(output_path_kendall, dpi=300, bbox_inches="tight")
-    print(f"График Кендалла сохранен: {output_path_kendall}")
-    plt.show()
+    fig2.savefig(output_dir / "kendall_vs_samples.pdf", dpi=300, bbox_inches="tight")
     plt.close(fig2)
 
-    # Создаем сводную таблицу
     summary = []
-    for i, (train_size, sp_mean, sp_std, k_mean, k_std) in enumerate(
-        zip(train_sizes, spearman_means, spearman_stds, kendall_means, kendall_stds)
-    ):
+    for result in valid_results:
+        metrics = result["metrics"]
         summary.append(
             {
-                "train_size": int(train_size),
-                "spearman_mean": float(sp_mean),
-                "spearman_std": float(sp_std),
-                "spearman_var": float(sp_std**2),
-                "kendall_mean": float(k_mean),
-                "kendall_std": float(k_std),
-                "kendall_var": float(k_std**2),
+                "train_size": int(result["n_models"]),
+                "spearman_mean": float(metrics["spearman_corr"]),
+                "spearman_std": 0.0,
+                "spearman_var": 0.0,
+                "kendall_mean": float(metrics["kendall_corr"]),
+                "kendall_std": 0.0,
+                "kendall_var": 0.0,
+                "recall_at_10_mean": float(metrics["recall_at_10"]),
+                "recall_at_10_std": 0.0,
+                "recall_at_10_var": 0.0,
+                "recall_at_50_mean": float(metrics["recall_at_50"]),
+                "recall_at_50_std": 0.0,
+                "recall_at_50_var": 0.0,
+                "recall_at_100_mean": float(metrics["recall_at_100"]),
+                "recall_at_100_std": 0.0,
+                "recall_at_100_var": 0.0,
             }
         )
 
-    with open(output_dir / "correlation_summary.json", "w") as f:
+    with (output_dir / "correlation_summary.json").open("w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
-
-    # Печатаем таблицу
-    print("\n" + "=" * 80)
-    print("SUMMARY TABLE:")
-    print("=" * 80)
-    print(f"{'Train size':>12} {'Spearman (ρ)':>20} {'Kendall (τ)':>20}")
-    print(f"{'':>12} {'mean ± std':>20} {'mean ± std':>20}")
-    print("-" * 80)
-
-    for s in summary:
-        spearman_str = f"{s['spearman_mean']:.4f} ± {s['spearman_std']:.4f}"
-        kendall_str = f"{s['kendall_mean']:.4f} ± {s['kendall_std']:.4f}"
-        print(f"{s['train_size']:>12} {spearman_str:>20} {kendall_str:>20}")
-
-    print("=" * 80)
 
     return fig1, fig2
 
 
-def create_scatter_subplots_for_each_dataset(datasets_results, max_points_per_plot=500):
-    """
-    Создает отдельные subplot-ы для каждого набора данных с реальными точками.
-    """
-    for models_dir, train_size, results in datasets_results:
-        if not results:
+def build_model_counts(requested_counts: List[int], total_models: int) -> List[int]:
+    valid_counts = []
+    for count in requested_counts:
+        if count < 0:
             continue
-
-        n_models = len(results)
-        n_cols = min(5, n_models)
-        n_rows = (n_models + n_cols - 1) // n_cols
-
-        fig, axes = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows))
-
-        # Если только один subplot
-        if n_rows == 1 and n_cols == 1:
-            axes = np.array([[axes]])
-        elif n_rows == 1:
-            axes = axes.reshape(1, -1)
-        elif n_cols == 1:
-            axes = axes.reshape(-1, 1)
-        else:
-            axes = axes.reshape(n_rows, n_cols)
-
-        # Строим scatter plot для каждой модели
-        for idx, res in enumerate(results):
-            if idx >= n_rows * n_cols:
-                break
-
-            row = idx // n_cols
-            col = idx % n_cols
-            ax = axes[row, col]
-
-            # Выбираем подмножество точек для визуализации (чтобы не перегружать график)
-            if len(res["distances"]) > max_points_per_plot:
-                indices = np.random.choice(
-                    len(res["distances"]), max_points_per_plot, replace=False
-                )
-                distances_plot = res["distances"][indices]
-                similarities_plot = res["similarities"][indices]
-            else:
-                distances_plot = res["distances"]
-                similarities_plot = res["similarities"]
-
-            # Строим scatter plot
-            scatter = ax.scatter(
-                distances_plot,
-                similarities_plot,
-                alpha=0.5,
-                s=10,
-                c="steelblue",
-                edgecolors="none",
+        if count > total_models:
+            raise ValueError(
+                f"Requested model count {count} exceeds available train pool size {total_models}"
             )
+        valid_counts.append(int(count))
+    return sorted(set(valid_counts))
 
-            # Добавляем линию тренда
-            if len(distances_plot) > 1:
-                try:
-                    # Линейная регрессия
-                    z = np.polyfit(distances_plot, similarities_plot, 1)
-                    p = np.poly1d(z)
 
-                    # Генерируем точки для линии
-                    x_line = np.linspace(
-                        distances_plot.min(), distances_plot.max(), 100
-                    )
-                    y_line = p(x_line)
+def save_results(output_base: Path, results: List[Dict]) -> None:
+    output_base.mkdir(parents=True, exist_ok=True)
+    with (output_base / "ablation_results.json").open("w", encoding="utf-8") as f:
+        json.dump(results, f, indent=2)
 
-                    ax.plot(
-                        x_line, y_line, "r-", alpha=0.8, linewidth=1.5, label="Trend"
-                    )
-                except:
-                    pass  # Если не удалось вычислить линию тренда
 
-            # Настройки графика
-            ax.set_xlabel("Расстояние", fontsize=9)
-            ax.set_ylabel("Схожесть", fontsize=9)
+def print_summary(results: List[Dict]) -> None:
+    print("\n" + "=" * 60)
+    print("DIVERSITY ABLATION SUMMARY")
+    print("=" * 60)
+    if not results:
+        print("No results collected.")
+        return
 
-            # Короткое имя модели
-            model_name = Path(res["model_path"]).stem
-            if len(model_name) > 20:
-                model_name = model_name[:17] + "..."
-
-            ax.set_title(
-                f"{model_name}\nSpearman: {res['spearman_corr']:.3f}",
-                fontsize=10,
-                pad=5,
-            )
-
-            ax.grid(True, alpha=0.3, linestyle="--", linewidth=0.5)
-
-            # Добавляем коэффициент корреляции в текстовом виде
-            text_str = f"ρ = {res['spearman_corr']:.3f}\nτ = {res['kendall_corr']:.3f}"
-            ax.text(
-                0.05,
-                0.95,
-                text_str,
-                transform=ax.transAxes,
-                fontsize=9,
-                verticalalignment="top",
-                bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8),
-            )
-
-        # Скрываем пустые subplot-ы
-        for idx in range(n_models, n_rows * n_cols):
-            row = idx // n_cols
-            col = idx % n_cols
-            fig.delaxes(axes[row, col])
-
-        plt.suptitle(
-            f"Директория: {Path(models_dir).name}\nРазмер выборки: {train_size}",
-            fontsize=16,
-            y=1.02,
+    for result in results:
+        metrics = result.get("metrics")
+        if not metrics:
+            print(f"  n_models={result['n_models']:4d}: no metrics")
+            continue
+        print(
+            f"  n_models={result['n_models']:4d}: "
+            f"Spearman={metrics['spearman_corr']:.4f}, "
+            f"Kendall={metrics['kendall_corr']:.4f}, "
+            f"Recall@10={metrics['recall_at_10']:.4f}, "
+            f"Recall@50={metrics['recall_at_50']:.4f}, "
+            f"Recall@100={metrics['recall_at_100']:.4f}"
         )
-        plt.tight_layout()
 
-        # Сохраняем
-        output_name = f"scatter_plots_train_size_{train_size}"
-        output_path = f"{output_name}.png"
-        plt.savefig(output_path, dpi=300, bbox_inches="tight")
-        print(f"Сохранен график: {output_path}")
-        plt.show()
 
-        # Также сохраняем как PDF
-        pdf_path = f"{output_name}.pdf"
-        plt.savefig(pdf_path, bbox_inches="tight")
-        print(f"Сохранен PDF: {pdf_path}")
+def main():
+    args = parse_arguments()
+    params = json.loads(Path(args.hyperparameters_json).read_text())
+    config = TrainConfig(**params)
+
+    trainer = DiversityAblationTrainer(config)
+    print("Loading all models...")
+    trainer.load_all_models()
+    trainer.prepare_common_data(
+        n_pairs=args.n_pairs,
+        random_seed=config.seed,
+        matrix_cache_path=Path(args.matrix_cache_path),
+    )
+
+    model_counts = build_model_counts(args.model_counts, len(trainer.train_indices))
+    if not model_counts:
+        print("No model counts to process.")
+        return
+
+    output_base = Path(args.output_base)
+    plots_dir = Path(args.plots_dir)
+    output_base.mkdir(parents=True, exist_ok=True)
+    plots_dir.mkdir(parents=True, exist_ok=True)
+
+    results = []
+    cumulative_indices: List[int] = []
+
+    for iteration_idx, n_models in enumerate(model_counts):
+        save_dir = output_base / f"train_size_{n_models}"
+        checkpoint_path = save_dir / "model_diversity.pth"
+
+        print(f"\n{'=' * 60}")
+        print(f"Processing {n_models} models (cumulative)")
+        print(f"{'=' * 60}")
+
+        if iteration_idx == 0:
+            if n_models == 0:
+                cumulative_indices = []
+            else:
+                np.random.seed(config.seed)
+                cumulative_indices = list(np.random.choice(trainer.train_indices, size=n_models, replace=False))
+                np.random.seed(None)
+        else:
+            candidates = [i for i in trainer.train_indices if i not in cumulative_indices]
+            n_to_add = n_models - len(cumulative_indices)
+            if n_to_add > 0:
+                np.random.seed(None)
+                new_indices = list(np.random.choice(candidates, size=n_to_add, replace=False))
+                cumulative_indices = cumulative_indices + new_indices
+
+        if args.skip_existing and checkpoint_path.exists():
+            print(f"Loading diversity surrogate from {checkpoint_path}...")
+            model_diversity = trainer.load_diversity_model(checkpoint_path)
+            loaded_from_checkpoint = True
+        else:
+            if n_models == 0:
+                print("Initializing diversity surrogate with random weights (no training)...")
+                model_diversity = trainer.build_diversity_model()
+            else:
+                print(f"Training diversity surrogate on {len(cumulative_indices)} models...")
+                model_diversity = trainer.train_diversity_model(cumulative_indices)
+            trainer.save_diversity_model(model_diversity, save_dir)
+            loaded_from_checkpoint = False
+
+        print("Computing embeddings and metrics...")
+        embs_np = trainer.compute_embeddings_for_model(model_diversity)
+        metrics = trainer.evaluate_embeddings(embs_np)
+
+        results.append(
+            {
+                "n_models": n_models,
+                "loaded_from_checkpoint": loaded_from_checkpoint,
+                "checkpoint_path": str(checkpoint_path),
+                "metrics": metrics,
+            }
+        )
+
+    print("\nGenerating plots...")
+    plot_correlation_vs_samples(results, plots_dir)
+    plot_recall_vs_samples(results, plots_dir)
+    save_results(output_base, results)
+    print_summary(results)
 
 
 if __name__ == "__main__":
-    # Список кортежей: (путь_к_директории, размер_обучающей_выборки)
-    DATASETS = [
-        (
-            "/home/alexander/RAS/m1p/predicator-function-for-neural-networks/code/results/surrogates/CIFAR100/ablations/train_size_0",
-            0,
-        ),
-        (
-            "/home/alexander/RAS/m1p/predicator-function-for-neural-networks/code/results/surrogates/CIFAR100/ablations/train_size_250",
-            250,
-        ),
-        (
-            "/home/alexander/RAS/m1p/predicator-function-for-neural-networks/code/results/surrogates/CIFAR100/ablations/train_size_500",
-            500,
-        ),
-        (
-            "/home/alexander/RAS/m1p/predicator-function-for-neural-networks/code/results/surrogates/CIFAR100/ablations/train_size_1000",
-            1000,
-        ),
-        (
-            "/home/alexander/RAS/m1p/predicator-function-for-neural-networks/code/results/surrogates/CIFAR100/ablations/train_size_1500",
-            1500,
-        ),
-        (
-            "/home/alexander/RAS/m1p/predicator-function-for-neural-networks/code/results/surrogates/CIFAR100/ablations/train_size_2000",
-            2000,
-        ),
-    ]
-
-    # Загружаем общие данные ОДИН РАЗ
-    print("=" * 60)
-    print("ЗАГРУЗКА ОБЩИХ ДАННЫХ")
-    print("=" * 60)
-    common_data = load_common_data(CONFIG_PATH, n_pairs=1000, random_seed=42)
-
-    if common_data is None:
-        print("Не удалось загрузить общие данные!")
-        sys.exit(1)
-
-    # Анализируем все наборы данных
-    datasets_results = []
-    model_index_offset = 0
-
-    for models_dir, train_size in DATASETS:
-        print(f"\n{'='*60}")
-        print(f"Анализ директории: {models_dir}")
-        print(f"Размер обучающей выборки: {train_size}")
-        print("=" * 60)
-
-        results = analyze_single_dataset_with_common_data(
-            common_data, models_dir, model_index_offset
-        )
-        datasets_results.append((models_dir, train_size, results))
-
-        if results:
-            model_index_offset += len(results)
-
-    # Строим графики зависимости от размера выборки с дисперсией
-    plot_correlation_vs_samples(datasets_results)
-
-    # Создаем отдельные subplot-ы с реальными точками для каждого набора данных
-    # create_scatter_subplots_for_each_dataset(datasets_results)
-
-    # Итоговая статистика
-    print("\n" + "=" * 80)
-    print("ИТОГОВАЯ СТАТИСТИКА ПО ВСЕМ ДАННЫМ")
-    print("=" * 80)
-
-    all_spearman = []
-    all_kendall = []
-
-    for models_dir, train_size, results in datasets_results:
-        if results:
-            spearman_vals = [r["spearman_corr"] for r in results]
-            kendall_vals = [r["kendall_corr"] for r in results]
-
-            all_spearman.extend(spearman_vals)
-            all_kendall.extend(kendall_vals)
-
-            print(f"\nРазмер выборки {train_size} ({len(results)} моделей):")
-            print(
-                f"  Spearman: {np.mean(spearman_vals):.4f} ± {np.std(spearman_vals):.4f}"
-            )
-            print(
-                f"  Kendall: {np.mean(kendall_vals):.4f} ± {np.std(kendall_vals):.4f}"
-            )
-
-    if all_spearman:
-        print(f"\nВсего моделей: {len(all_spearman)}")
-        print(
-            f"Общее среднее Spearman: {np.mean(all_spearman):.4f} ± {np.std(all_spearman):.4f}"
-        )
-        print(
-            f"Общее среднее Kendall: {np.mean(all_kendall):.4f} ± {np.std(all_kendall):.4f}"
-        )
-
-    print("=" * 80)
+    main()

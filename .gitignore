@@ -26,7 +26,7 @@ code/surrogate_test.sh
 code/train_test.sh
 code/junk
 .vscode
-
+*.npz
 
 *.zip
 

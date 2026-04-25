@@ -1,11 +1,11 @@
 {
     "seed": 42,
-    "num_workers": 20,
-    "dataset_path": "/home/alexander/RAS/m1p/predicator-function-for-neural-networks/code/datasets/CIFAR100_united/architectures",
-    "acc_dataset_path": "/home/alexander/RAS/m1p/predicator-function-for-neural-networks/code/datasets/CIFAR100_united/architectures",
-    "div_dataset_path": "/home/alexander/RAS/m1p/predicator-function-for-neural-networks/code/datasets/CIFAR100_united/architectures",
+    "num_workers": 8,
+    "dataset_path": "/home/udeneev-av/predicator-function-for-neural-networks/code/datasets/CIFAR100_united/architectures",
+    "acc_dataset_path": "/home/udeneev-av/predicator-function-for-neural-networks/code/datasets/CIFAR100_united/architectures",
+    "div_dataset_path": "/home/udeneev-av/predicator-function-for-neural-networks/code/datasets/CIFAR100_united/architectures",
 
-    "device": "cpu",
+    "device": "cuda",
     "developer_mode": false,
 
     "n_models": 2925,
@@ -14,7 +14,7 @@
     "lower_margin": 0.1,
     "diversity_matrix_metric": "overlap",
 
-    "train_size": 0.8,
+    "train_size": 0.7,
     "batch_size": 64,
     "input_dim": 8,
 

@@ -13,10 +13,9 @@ import torch.nn.functional as F
 from torch.utils.data import random_split, DataLoader
 from scipy.spatial import distance
 import shutil
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import matplotlib  # fastfix
-
-matplotlib.use("TkAgg")
 
 # Custom imports
 import sys
