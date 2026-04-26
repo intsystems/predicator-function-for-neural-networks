@@ -25,6 +25,7 @@ from torch_geometric.nn import GATv2Conv, GraphNorm
 from torch_geometric.nn.aggr import AttentionalAggregation
 
 from pathlib import Path
+from typing import Any, Dict, Iterable, Optional
 
 from sklearn.metrics import (
     r2_score,
@@ -333,8 +334,16 @@ class CustomDataset(Dataset):
         adj, features = CustomDataset.preprocess(adj, features)
         return graph.index, adj, features
 
-    def __init__(self, models_dict_path, accuracies=None, use_tqdm=False, preload=False):
-        self.models_dict_path = [Path(path) for path in models_dict_path]
+    def __init__(
+        self,
+        models_dict_path=None,
+        accuracies=None,
+        use_tqdm=False,
+        preload=False,
+        model_dicts: Optional[Iterable[Dict[str, Any]]] = None,
+    ):
+        self.models_dict_path = [Path(path) for path in models_dict_path] if models_dict_path is not None else []
+        self.model_dicts = list(model_dicts) if model_dicts is not None else None
         self.accuracies = (
             torch.tensor(accuracies, dtype=torch.float)
             if accuracies is not None
@@ -342,17 +351,26 @@ class CustomDataset(Dataset):
         )
         self._cache = {}
 
+        if self.model_dicts is None and not self.models_dict_path:
+            raise ValueError("Either models_dict_path or model_dicts must be provided")
+
         if preload:
-            iterator = range(len(self.models_dict_path))
+            iterator = range(len(self))
             if use_tqdm:
                 iterator = tqdm(iterator, desc="Preloading graphs", leave=False)
             for index in iterator:
                 self._cache[index] = self._build_data(index)
 
-    def _build_data(self, index):
+    def _get_model_dict(self, index):
+        if self.model_dicts is not None:
+            return self.model_dicts[index]
+
         path = self.models_dict_path[index]
         with path.open("r", encoding="utf-8") as f:
-            model_dict = json.load(f)
+            return json.load(f)
+
+    def _build_data(self, index):
+        model_dict = self._get_model_dict(index)
 
         graph = Graph(model_dict, index=index)
         _, adj, features = self.process_graph(graph)
@@ -362,7 +380,8 @@ class CustomDataset(Dataset):
         data.index = index
         data.sample_id = torch.tensor([index], dtype=torch.long)
         data.dataset_position = index
-        data.source_path = str(path)
+        if self.model_dicts is None:
+            data.source_path = str(self.models_dict_path[index])
         if self.accuracies is not None:
             data.y = self.accuracies[index]
         return data
@@ -373,6 +392,8 @@ class CustomDataset(Dataset):
         return self._cache[index].clone()
 
     def __len__(self):
+        if self.model_dicts is not None:
+            return len(self.model_dicts)
         return len(self.models_dict_path)
 
 
@@ -764,6 +785,7 @@ def save_accuracy_predictions(
 
     return true_accs_sorted, pred_accs_sorted
 
+
 def plot_train_valid_losses(
     train_losses, valid_losses, file_name="train_valid_losses.png"
 ):
@@ -847,3 +869,44 @@ def extract_embeddings(model, data_loader, device, use_tqdm=True):
     embeddings = np.vstack(embeddings).squeeze()
     indices = np.concatenate(indices)
     return embeddings, indices
+
+
+def extract_dual_embeddings(
+    accuracy_model,
+    diversity_model,
+    data_loader,
+    device,
+    use_tqdm=True,
+):
+    accuracy_model.to(device)
+    diversity_model.to(device)
+    accuracy_model.eval()
+    diversity_model.eval()
+
+    accuracy_embeddings = []
+    diversity_embeddings = []
+    indices = []
+
+    iterator = tqdm(data_loader) if use_tqdm else data_loader
+
+    with torch.no_grad():
+        for batch in iterator:
+            if isinstance(batch, tuple):
+                batch = batch[0]
+            batch = batch.to(device)
+
+            batch_accuracy = accuracy_model(batch.x, batch.edge_index, batch.batch)
+            batch_diversity = diversity_model(batch.x, batch.edge_index, batch.batch)
+
+            accuracy_embeddings.append(batch_accuracy.cpu().numpy())
+            diversity_embeddings.append(batch_diversity.cpu().numpy())
+
+            sample_ids = getattr(batch, "sample_id", None)
+            if sample_ids is None:
+                sample_ids = batch.index
+            indices.append(sample_ids.view(-1).cpu().numpy())
+
+    accuracy_embeddings = np.vstack(accuracy_embeddings).squeeze()
+    diversity_embeddings = np.vstack(diversity_embeddings).squeeze()
+    indices = np.concatenate(indices)
+    return accuracy_embeddings, diversity_embeddings, indices

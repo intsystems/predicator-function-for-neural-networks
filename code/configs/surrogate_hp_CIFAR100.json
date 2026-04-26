@@ -1,6 +1,6 @@
 {
     "seed": 42,
-    "num_workers": 8,
+    "num_workers": 40,
     "dataset_path": "/home/udeneev-av/predicator-function-for-neural-networks/code/datasets/CIFAR100_united/architectures",
     "acc_dataset_path": "/home/udeneev-av/predicator-function-for-neural-networks/code/datasets/CIFAR100_united/architectures",
     "div_dataset_path": "/home/udeneev-av/predicator-function-for-neural-networks/code/datasets/CIFAR100_united/architectures",
@@ -18,7 +18,7 @@
     "batch_size": 64,
     "input_dim": 8,
 
-    "acc_num_epochs": 1,
+    "acc_num_epochs": 100,
     "acc_lr_start": 1e-3,
     "acc_lr_end": 1e-4,
     "acc_dropout": 0.1,
@@ -32,20 +32,20 @@
     "margin": 1,
     "div_output_dim": 16,
 
-    "surrogate_inference_path": "/home/alexander/RAS/m1p/predicator-function-for-neural-networks/code/results/surrogates/CIFAR100",
+    "surrogate_inference_path": "/home/udeneev-av/predicator-function-for-neural-networks/code/results/surrogates/CIFAR100",
 
     "use_pretrained_models_for_ensemble": false,
     "n_ensemble_models": 5,
-    "n_models_in_pool": 4096,
-    "n_models_to_generate": 10,
-    "batch_size_inference": 4096,
-    "min_accuracy_for_pool": 0.384,
+    "n_models_in_pool": 4096000,
+    "n_models_to_generate": 4096000,
+    "batch_size_inference": 16384,
+    "min_accuracy_for_pool": 0.0000384,
     "acc_distance_gamma": 1,
     "min_acc_and_div_to_ensemble": 0.9,
     "best_models_save_path": "best_models/",
     "tmp_archs_path": "datasets/tmp_archs/",
-    "random_choice_out_of_best": true,
-    "greedy_choice_out_of_best": false,
+    "random_choice_out_of_best": false,
+    "greedy_choice_out_of_best": true,
 
     "train_size_final": 1.0,
     "n_epochs_final": 600,
@@ -56,7 +56,7 @@
     "auxiliary_loss_weight": 0.4,
     "batch_size_final": 96,
     "dataset_name": "CIFAR100",
-    "max_per_gpu": 10,
+    "max_per_gpu": 3,
 
     "final_dataset_path": "datasets/final_dataset/",
     "evaluate_ensemble_flag": true,

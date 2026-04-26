@@ -5,12 +5,11 @@ import torch
 import torch.nn.functional as F
 import json
 import argparse
-import shutil
 from pathlib import Path
 import gc
 import random
 import re
-from typing import List, Dict, Tuple, Any
+from typing import Iterable, List, Dict, Tuple, Any
 
 from torch_geometric.utils import dense_to_sparse
 import matplotlib.pyplot as plt
@@ -29,10 +28,11 @@ from dependencies.GCN import (
     GAT_ver_2,
     CustomDataset,
     collate_graphs,
-    extract_embeddings,
+    extract_dual_embeddings,
 )
 from dependencies.data_generator import (
     generate_arch_dicts,
+    generate_arch_dicts_in_chunks,
     load_dataset_on_inference,
 )
 from dependencies.train_config import TrainConfig
@@ -48,8 +48,6 @@ class InferSurrogate:
         self.config = config
         self.device = torch.device(self.config.device)
         self.surrogate_dataset_path = Path(self.config.surrogate_inference_path)
-        self.tmp_dir = Path(self.config.tmp_archs_path)
-
         self._clear_all_buffers()
 
     def initialize_models(self) -> None:
@@ -141,7 +139,7 @@ class InferSurrogate:
             f"\n--- Selection finished. Total models in ensemble: {len(self.selected_archs)} ---"
         )
 
-    def save_models(self, cleanup_tmp: bool = True) -> None:
+    def save_models(self) -> None:
         if not self.selected_archs:
             print("Warning: No models were selected, nothing to save.")
             return
@@ -174,9 +172,6 @@ class InferSurrogate:
 
         print(f"Successfully saved {len(self.selected_archs)} model architectures.")
 
-        if cleanup_tmp:
-            shutil.rmtree(self.tmp_dir, ignore_errors=True)
-            print("Temporary directory cleaned up.")
 
     def greedy_forward_selection(
         self,
@@ -299,9 +294,50 @@ class InferSurrogate:
     def _prepare_potential_models(self) -> None:
         print("\n--- Preparing potential models pool ---")
 
+        total_seen = 0
+        total_kept = 0
+
+        for chunk_idx, arch_chunk in enumerate(self._iter_architecture_chunks(), start=1):
+            if not arch_chunk:
+                continue
+
+            total_seen += len(arch_chunk)
+            archs, accs_np, embs_np = self._get_embeddings(arch_chunk)
+            mask = (accs_np / 100) >= self.config.min_accuracy_for_pool
+
+            kept_archs = [arch for arch, ok in zip(archs, mask) if ok]
+            kept_accs = accs_np[mask]
+            kept_embs = embs_np[mask]
+
+            if kept_archs:
+                self.potential_archs.extend(kept_archs)
+                self._append_potential_arrays(kept_accs, kept_embs)
+                total_kept += len(kept_archs)
+
+            print(
+                f"Processed chunk {chunk_idx}: {len(arch_chunk)} models, "
+                f"kept {len(kept_archs)} after accuracy filter. "
+                f"Accumulated kept models: {total_kept}."
+            )
+
+            torch.cuda.empty_cache()
+            gc.collect()
+
+        if total_seen == 0:
+            print("Error: No initial architectures were loaded or generated.")
+            return
+
+        print(
+            f"Initial pool size: {total_seen}. "
+            f"After filtering by accuracy >= {self.config.min_accuracy_for_pool}: {len(self.potential_archs)} models."
+        )
+
+    def _iter_architecture_chunks(self) -> Iterable[List[Dict]]:
         if self.config.use_pretrained_models_for_ensemble:
             load_dataset_on_inference(self.config)
-            initial_archs = []
+            chunk_size = max(1, getattr(self.config, "n_models_in_pool", 1))
+            current_chunk = []
+
             for arch_json_path in tqdm(
                 self.config.models_dict_path, desc="Loading pretrained archs"
             ):
@@ -313,52 +349,47 @@ class InferSurrogate:
                     "valid_accuracy",
                 ):
                     arch.pop(key, None)
-                arch["id"] = int(
-                    re.search(r"model_(\d+)", str(arch_json_path)).group(1)
-                )
-                initial_archs.append(arch)
-        else:
-            initial_archs = generate_arch_dicts(
-                self.config.n_models_to_generate, use_tqdm=True
-            )
+                match = re.search(r"model_(\d+)", str(arch_json_path))
+                if match is not None:
+                    arch["id"] = int(match.group(1))
+                current_chunk.append(arch)
 
-        if not initial_archs:
-            print("Error: No initial architectures were loaded or generated.")
+                if len(current_chunk) >= chunk_size:
+                    yield current_chunk
+                    current_chunk = []
+
+            if current_chunk:
+                yield current_chunk
             return
 
-        archs, accs_np, embs_np = self._get_embeddings(initial_archs)
-
-        mask = (accs_np / 100) >= self.config.min_accuracy_for_pool
-
-        self.potential_archs = [arch for arch, ok in zip(archs, mask) if ok]
-        self.potential_accuracies = accs_np[mask]
-        self.potential_embeddings = embs_np[mask]
-
-        print(
-            f"Initial pool size: {len(initial_archs)}. "
-            f"After filtering by accuracy >= {self.config.min_accuracy_for_pool}: {len(self.potential_archs)} models."
+        yield from generate_arch_dicts_in_chunks(
+            n_models=self.config.n_models_to_generate,
+            chunk_size=self.config.n_models_in_pool,
+            use_tqdm=True,
+            n_jobs=self.config.num_workers,
         )
 
-        torch.cuda.empty_cache()
-        gc.collect()
+    def _append_potential_arrays(self, accs: np.ndarray, embs: np.ndarray) -> None:
+        if self.potential_accuracies.size == 0:
+            self.potential_accuracies = accs.copy()
+        else:
+            self.potential_accuracies = np.concatenate([self.potential_accuracies, accs])
+
+        if self.potential_embeddings.size == 0:
+            self.potential_embeddings = embs.copy()
+        else:
+            self.potential_embeddings = np.concatenate(
+                [self.potential_embeddings, embs], axis=0
+            )
 
     def _get_embeddings(
         self, archs: List[Dict]
     ) -> Tuple[List[Dict], np.ndarray, np.ndarray]:
         """
         Calculates accuracy predictions and diversity embeddings for a list of architectures.
-        This method always works with a clean temporary directory.
+        Uses in-memory graph construction and a single pass through the loader for both surrogate models.
         """
-        shutil.rmtree(self.tmp_dir, ignore_errors=True)
-        self.tmp_dir.mkdir(parents=True, exist_ok=True)
-
-        arch_paths = []
-        for i, arch in enumerate(archs):
-            path = self.tmp_dir / f"arch_{i}.json"
-            path.write_text(json.dumps(arch), encoding="utf-8")
-            arch_paths.append(path)
-
-        dataset = CustomDataset(arch_paths, use_tqdm=True)
+        dataset = CustomDataset(model_dicts=archs, use_tqdm=False)
         loader = DataLoader(
             dataset,
             batch_size=self.config.batch_size_inference,
@@ -368,17 +399,15 @@ class InferSurrogate:
         )
 
         with torch.no_grad():
-            print("Extracting accuracy predictions...")
-            emb_acc_np, _ = extract_embeddings(
-                self.model_accuracy, loader, self.device, use_tqdm=True
+            emb_acc_np, emb_div_np, _ = extract_dual_embeddings(
+                self.model_accuracy,
+                self.model_diversity,
+                loader,
+                self.device,
+                use_tqdm=True,
             )
 
-            print("Extracting diversity embeddings...")
-            emb_div_np, _ = extract_embeddings(
-                self.model_diversity, loader, self.device, use_tqdm=True
-            )
-
-        return archs, emb_acc_np.flatten(), emb_div_np
+        return archs, np.asarray(emb_acc_np).reshape(-1), np.asarray(emb_div_np)
 
     def _get_score(self, accuracy: torch.Tensor, dist: torch.Tensor) -> torch.Tensor:
         """

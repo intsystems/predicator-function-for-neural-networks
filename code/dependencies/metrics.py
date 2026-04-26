@@ -223,45 +223,45 @@ def collect_ensemble_stats(
 
     # --- Adversarial атаки ---
     # FGSM
-    fgsm_epsilons = [0, 0.02, 0.04, 0.08, 0.1]
-    fgsm_results = adversarial_attack(
-        valid_models,
-        test_loader,
-        fgsm_epsilons,
-        device=device,
-        mean=mean,
-        std=std,
-        attack_type="FGSM",
-        developer_mode=developer_mode,
-    )
+    # fgsm_epsilons = [0, 0.02, 0.04, 0.08, 0.1]
+    # fgsm_results = adversarial_attack(
+    #     valid_models,
+    #     test_loader,
+    #     fgsm_epsilons,
+    #     device=device,
+    #     mean=mean,
+    #     std=std,
+    #     attack_type="FGSM",
+    #     developer_mode=developer_mode,
+    # )
 
-    # BIM
-    bim_epsilons = [0, 0.02, 0.04, 0.08, 0.1]
-    bim_results = adversarial_attack(
-        valid_models,
-        test_loader,
-        bim_epsilons,
-        device=device,
-        mean=mean,
-        std=std,
-        attack_type="BIM",
-        num_steps=10,
-        developer_mode=developer_mode,
-    )
+    # # BIM
+    # bim_epsilons = [0, 0.02, 0.04, 0.08, 0.1]
+    # bim_results = adversarial_attack(
+    #     valid_models,
+    #     test_loader,
+    #     bim_epsilons,
+    #     device=device,
+    #     mean=mean,
+    #     std=std,
+    #     attack_type="BIM",
+    #     num_steps=10,
+    #     developer_mode=developer_mode,
+    # )
 
-    # PGD
-    pgd_epsilons = [0, 0.02, 0.04, 0.08, 0.1]
-    pgd_results = adversarial_attack(
-        valid_models,
-        test_loader,
-        pgd_epsilons,
-        device=device,
-        mean=mean,
-        std=std,
-        attack_type="PGD",
-        num_steps=10,
-        developer_mode=developer_mode,
-    )
+    # # PGD
+    # pgd_epsilons = [0, 0.02, 0.04, 0.08, 0.1]
+    # pgd_results = adversarial_attack(
+    #     valid_models,
+    #     test_loader,
+    #     pgd_epsilons,
+    #     device=device,
+    #     mean=mean,
+    #     std=std,
+    #     attack_type="PGD",
+    #     num_steps=10,
+    #     developer_mode=developer_mode,
+    # )
 
     return {
         "total": total,
@@ -282,9 +282,9 @@ def collect_ensemble_stats(
         "predictive_disagreement": predictive_disagreement,
         "normalized_predictive_disagreement": normalized_predictive_disagreement,
         "ambiguity": ambiguity,
-        "fgsm_results": fgsm_results,
-        "bim_results": bim_results,
-        "pgd_results": pgd_results,
+        # "fgsm_results": fgsm_results,
+        # "bim_results": bim_results,
+        # "pgd_results": pgd_results,
     }
 
 

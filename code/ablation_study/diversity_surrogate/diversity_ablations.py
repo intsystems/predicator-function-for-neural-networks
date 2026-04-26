@@ -4,6 +4,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from collections import defaultdict
 from typing import Dict, List, Optional, Tuple
 
 import matplotlib
@@ -97,6 +98,12 @@ def parse_arguments():
         type=int,
         default=1000,
         help="Number of test-test pairs for correlation evaluation",
+    )
+    parser.add_argument(
+        "--num_repeats",
+        type=int,
+        default=1,
+        help="Number of repeated runs for each training set size",
     )
     return parser.parse_args()
 
@@ -320,13 +327,14 @@ class DiversityAblationTrainer:
             [train_triplet_count, valid_triplet_count],
         )
 
+        safe_num_workers = min(self.config.num_workers, 8)
         loader_kwargs = {
-            "num_workers": self.config.num_workers,
-            "pin_memory": self.device.type == "cuda",
+            "num_workers": safe_num_workers,
+            "pin_memory": False,
             "collate_fn": collate_triplets,
         }
-        if self.config.num_workers > 0:
-            loader_kwargs["persistent_workers"] = True
+        if safe_num_workers > 0:
+            loader_kwargs["persistent_workers"] = False
             loader_kwargs["prefetch_factor"] = 2
 
         print(
@@ -408,13 +416,10 @@ class DiversityAblationTrainer:
             preload=True,
         )
         loader_kwargs = {
-            "num_workers": self.config.num_workers,
-            "pin_memory": self.device.type == "cuda",
+            "num_workers": 0,
+            "pin_memory": False,
             "collate_fn": collate_graphs,
         }
-        if self.config.num_workers > 0:
-            loader_kwargs["persistent_workers"] = True
-            loader_kwargs["prefetch_factor"] = 2
 
         loader = DataLoader(
             dataset,
@@ -469,11 +474,6 @@ class DiversityAblationTrainer:
             "recall_at_10": float(recall_metrics["recall_at_10"]),
             "recall_at_50": float(recall_metrics["recall_at_50"]),
             "recall_at_100": float(recall_metrics["recall_at_100"]),
-            "recall_at_10_per_query": recall_metrics["recall_at_10_per_query"].tolist(),
-            "recall_at_50_per_query": recall_metrics["recall_at_50_per_query"].tolist(),
-            "recall_at_100_per_query": recall_metrics["recall_at_100_per_query"].tolist(),
-            "distances": distances.tolist(),
-            "similarities": similarities.tolist(),
         }
 
     def _triplet_loss(self, a: torch.Tensor, p: torch.Tensor, n: torch.Tensor) -> torch.Tensor:
@@ -498,9 +498,7 @@ def get_random_pairs(indices1, indices2, n_pairs):
 def compute_recall_at_k_for_model(embs_np, diversity_matrix, test_indices, k_values=(10, 50, 100)):
     test_indices = np.array(test_indices)
     if len(test_indices) <= 1:
-        return {f"recall_at_{k}": np.nan for k in k_values} | {
-            f"recall_at_{k}_per_query": np.array([]) for k in k_values
-        }
+        return {f"recall_at_{k}": np.nan for k in k_values}
 
     max_neighbors = len(test_indices) - 1
     effective_k_values = [min(k, max_neighbors) for k in k_values]
@@ -523,7 +521,6 @@ def compute_recall_at_k_for_model(embs_np, diversity_matrix, test_indices, k_val
     for k in k_values:
         per_query = np.array(recall_per_k[k], dtype=float)
         result[f"recall_at_{k}"] = float(np.mean(per_query)) if len(per_query) > 0 else np.nan
-        result[f"recall_at_{k}_per_query"] = per_query
     return result
 
 
@@ -536,20 +533,59 @@ def compute_mean_and_variance(data):
     return mean, std, var
 
 
-def plot_recall_vs_samples(results, output_dir: Path):
-    valid_results = [r for r in results if r.get("metrics")]
+def aggregate_results_by_train_size(results: List[Dict]) -> List[Dict]:
+    grouped_results: Dict[int, List[Dict]] = defaultdict(list)
+    for result in results:
+        grouped_results[int(result["n_models"])].append(result)
+
+    aggregated = []
+    metric_names = [
+        "spearman_corr",
+        "kendall_corr",
+        "recall_at_10",
+        "recall_at_50",
+        "recall_at_100",
+    ]
+
+    for train_size in sorted(grouped_results):
+        runs = grouped_results[train_size]
+        metrics_by_name = {
+            metric_name: np.array([run["metrics"][metric_name] for run in runs], dtype=float)
+            for metric_name in metric_names
+        }
+        aggregated.append(
+            {
+                "train_size": train_size,
+                "num_runs": len(runs),
+                "runs": runs,
+                "summary": {
+                    metric_name: {
+                        "mean": float(np.mean(values)),
+                        "std": float(np.std(values)),
+                        "var": float(np.var(values)),
+                    }
+                    for metric_name, values in metrics_by_name.items()
+                },
+            }
+        )
+    return aggregated
+
+
+
+def plot_recall_vs_samples(aggregated_results, output_dir: Path):
+    valid_results = [r for r in aggregated_results if r.get("summary")]
     if not valid_results:
         print("No valid recall results to plot.")
         return []
 
-    train_sizes = np.array([r["n_models"] for r in valid_results])
-    recall10_means = np.array([r["metrics"]["recall_at_10"] for r in valid_results])
-    recall50_means = np.array([r["metrics"]["recall_at_50"] for r in valid_results])
-    recall100_means = np.array([r["metrics"]["recall_at_100"] for r in valid_results])
+    train_sizes = np.array([r["train_size"] for r in valid_results])
+    recall10_means = np.array([r["summary"]["recall_at_10"]["mean"] for r in valid_results])
+    recall50_means = np.array([r["summary"]["recall_at_50"]["mean"] for r in valid_results])
+    recall100_means = np.array([r["summary"]["recall_at_100"]["mean"] for r in valid_results])
 
-    recall10_stds = np.zeros_like(recall10_means)
-    recall50_stds = np.zeros_like(recall50_means)
-    recall100_stds = np.zeros_like(recall100_means)
+    recall10_stds = np.array([r["summary"]["recall_at_10"]["std"] for r in valid_results])
+    recall50_stds = np.array([r["summary"]["recall_at_50"]["std"] for r in valid_results])
+    recall100_stds = np.array([r["summary"]["recall_at_100"]["std"] for r in valid_results])
 
     output_dir.mkdir(parents=True, exist_ok=True)
     recall_specs = [
@@ -595,17 +631,17 @@ def plot_recall_vs_samples(results, output_dir: Path):
     return figures
 
 
-def plot_correlation_vs_samples(results, output_dir: Path):
-    valid_results = [r for r in results if r.get("metrics")]
+def plot_correlation_vs_samples(aggregated_results, output_dir: Path):
+    valid_results = [r for r in aggregated_results if r.get("summary")]
     if not valid_results:
         print("No valid correlation results to plot.")
         return None, None
 
-    train_sizes = np.array([r["n_models"] for r in valid_results])
-    spearman_means = np.array([r["metrics"]["spearman_corr"] for r in valid_results])
-    kendall_means = np.array([r["metrics"]["kendall_corr"] for r in valid_results])
-    spearman_stds = np.zeros_like(spearman_means)
-    kendall_stds = np.zeros_like(kendall_means)
+    train_sizes = np.array([r["train_size"] for r in valid_results])
+    spearman_means = np.array([r["summary"]["spearman_corr"]["mean"] for r in valid_results])
+    kendall_means = np.array([r["summary"]["kendall_corr"]["mean"] for r in valid_results])
+    spearman_stds = np.array([r["summary"]["spearman_corr"]["std"] for r in valid_results])
+    kendall_stds = np.array([r["summary"]["kendall_corr"]["std"] for r in valid_results])
 
     output_dir.mkdir(parents=True, exist_ok=True)
     margin = (train_sizes[-1] - train_sizes[0]) * 0.1 if len(train_sizes) > 1 else 1
@@ -674,25 +710,26 @@ def plot_correlation_vs_samples(results, output_dir: Path):
 
     summary = []
     for result in valid_results:
-        metrics = result["metrics"]
+        metrics = result["summary"]
         summary.append(
             {
-                "train_size": int(result["n_models"]),
-                "spearman_mean": float(metrics["spearman_corr"]),
-                "spearman_std": 0.0,
-                "spearman_var": 0.0,
-                "kendall_mean": float(metrics["kendall_corr"]),
-                "kendall_std": 0.0,
-                "kendall_var": 0.0,
-                "recall_at_10_mean": float(metrics["recall_at_10"]),
-                "recall_at_10_std": 0.0,
-                "recall_at_10_var": 0.0,
-                "recall_at_50_mean": float(metrics["recall_at_50"]),
-                "recall_at_50_std": 0.0,
-                "recall_at_50_var": 0.0,
-                "recall_at_100_mean": float(metrics["recall_at_100"]),
-                "recall_at_100_std": 0.0,
-                "recall_at_100_var": 0.0,
+                "train_size": int(result["train_size"]),
+                "num_runs": int(result["num_runs"]),
+                "spearman_mean": float(metrics["spearman_corr"]["mean"]),
+                "spearman_std": float(metrics["spearman_corr"]["std"]),
+                "spearman_var": float(metrics["spearman_corr"]["var"]),
+                "kendall_mean": float(metrics["kendall_corr"]["mean"]),
+                "kendall_std": float(metrics["kendall_corr"]["std"]),
+                "kendall_var": float(metrics["kendall_corr"]["var"]),
+                "recall_at_10_mean": float(metrics["recall_at_10"]["mean"]),
+                "recall_at_10_std": float(metrics["recall_at_10"]["std"]),
+                "recall_at_10_var": float(metrics["recall_at_10"]["var"]),
+                "recall_at_50_mean": float(metrics["recall_at_50"]["mean"]),
+                "recall_at_50_std": float(metrics["recall_at_50"]["std"]),
+                "recall_at_50_var": float(metrics["recall_at_50"]["var"]),
+                "recall_at_100_mean": float(metrics["recall_at_100"]["mean"]),
+                "recall_at_100_std": float(metrics["recall_at_100"]["std"]),
+                "recall_at_100_var": float(metrics["recall_at_100"]["var"]),
             }
         )
 
@@ -721,47 +758,36 @@ def save_results(output_base: Path, results: List[Dict]) -> None:
         json.dump(results, f, indent=2)
 
 
-def print_summary(results: List[Dict]) -> None:
+def print_summary(aggregated_results: List[Dict]) -> None:
     print("\n" + "=" * 60)
     print("DIVERSITY ABLATION SUMMARY")
     print("=" * 60)
-    if not results:
+    if not aggregated_results:
         print("No results collected.")
         return
 
-    for result in results:
-        metrics = result.get("metrics")
+    for result in aggregated_results:
+        metrics = result.get("summary")
         if not metrics:
-            print(f"  n_models={result['n_models']:4d}: no metrics")
+            print(f"  n_models={result['train_size']:4d}: no metrics")
             continue
         print(
-            f"  n_models={result['n_models']:4d}: "
-            f"Spearman={metrics['spearman_corr']:.4f}, "
-            f"Kendall={metrics['kendall_corr']:.4f}, "
-            f"Recall@10={metrics['recall_at_10']:.4f}, "
-            f"Recall@50={metrics['recall_at_50']:.4f}, "
-            f"Recall@100={metrics['recall_at_100']:.4f}"
+            f"  n_models={result['train_size']:4d} (runs={result['num_runs']}): "
+            f"Spearman={metrics['spearman_corr']['mean']:.4f}±{metrics['spearman_corr']['std']:.4f}, "
+            f"Kendall={metrics['kendall_corr']['mean']:.4f}±{metrics['kendall_corr']['std']:.4f}, "
+            f"Recall@10={metrics['recall_at_10']['mean']:.4f}±{metrics['recall_at_10']['std']:.4f}, "
+            f"Recall@50={metrics['recall_at_50']['mean']:.4f}±{metrics['recall_at_50']['std']:.4f}, "
+            f"Recall@100={metrics['recall_at_100']['mean']:.4f}±{metrics['recall_at_100']['std']:.4f}"
         )
 
 
 def main():
     args = parse_arguments()
+    if args.num_repeats <= 0:
+        raise ValueError("--num_repeats must be a positive integer")
+
     params = json.loads(Path(args.hyperparameters_json).read_text())
-    config = TrainConfig(**params)
-
-    trainer = DiversityAblationTrainer(config)
-    print("Loading all models...")
-    trainer.load_all_models()
-    trainer.prepare_common_data(
-        n_pairs=args.n_pairs,
-        random_seed=config.seed,
-        matrix_cache_path=Path(args.matrix_cache_path),
-    )
-
-    model_counts = build_model_counts(args.model_counts, len(trainer.train_indices))
-    if not model_counts:
-        print("No model counts to process.")
-        return
+    base_seed = int(params["seed"])
 
     output_base = Path(args.output_base)
     plots_dir = Path(args.plots_dir)
@@ -769,63 +795,96 @@ def main():
     plots_dir.mkdir(parents=True, exist_ok=True)
 
     results = []
-    cumulative_indices: List[int] = []
+    model_counts: Optional[List[int]] = None
 
-    for iteration_idx, n_models in enumerate(model_counts):
-        save_dir = output_base / f"train_size_{n_models}"
-        checkpoint_path = save_dir / "model_diversity.pth"
+    for repeat_idx in range(args.num_repeats):
+        repeat_seed = base_seed + repeat_idx
+        repeat_params = dict(params)
+        repeat_params["seed"] = repeat_seed
+        config = TrainConfig(**repeat_params)
 
-        print(f"\n{'=' * 60}")
-        print(f"Processing {n_models} models (cumulative)")
-        print(f"{'=' * 60}")
-
-        if iteration_idx == 0:
-            if n_models == 0:
-                cumulative_indices = []
-            else:
-                np.random.seed(config.seed)
-                cumulative_indices = list(np.random.choice(trainer.train_indices, size=n_models, replace=False))
-                np.random.seed(None)
-        else:
-            candidates = [i for i in trainer.train_indices if i not in cumulative_indices]
-            n_to_add = n_models - len(cumulative_indices)
-            if n_to_add > 0:
-                np.random.seed(None)
-                new_indices = list(np.random.choice(candidates, size=n_to_add, replace=False))
-                cumulative_indices = cumulative_indices + new_indices
-
-        if args.skip_existing and checkpoint_path.exists():
-            print(f"Loading diversity surrogate from {checkpoint_path}...")
-            model_diversity = trainer.load_diversity_model(checkpoint_path)
-            loaded_from_checkpoint = True
-        else:
-            if n_models == 0:
-                print("Initializing diversity surrogate with random weights (no training)...")
-                model_diversity = trainer.build_diversity_model()
-            else:
-                print(f"Training diversity surrogate on {len(cumulative_indices)} models...")
-                model_diversity = trainer.train_diversity_model(cumulative_indices)
-            trainer.save_diversity_model(model_diversity, save_dir)
-            loaded_from_checkpoint = False
-
-        print("Computing embeddings and metrics...")
-        embs_np = trainer.compute_embeddings_for_model(model_diversity)
-        metrics = trainer.evaluate_embeddings(embs_np)
-
-        results.append(
-            {
-                "n_models": n_models,
-                "loaded_from_checkpoint": loaded_from_checkpoint,
-                "checkpoint_path": str(checkpoint_path),
-                "metrics": metrics,
-            }
+        trainer = DiversityAblationTrainer(config)
+        print("Loading all models...")
+        trainer.load_all_models()
+        trainer.prepare_common_data(
+            n_pairs=args.n_pairs,
+            random_seed=repeat_seed,
+            matrix_cache_path=Path(args.matrix_cache_path),
         )
 
+        if model_counts is None:
+            model_counts = build_model_counts(args.model_counts, len(trainer.train_indices))
+            if not model_counts:
+                print("No model counts to process.")
+                return
+
+        cumulative_indices: List[int] = []
+
+        print(f"\n{'#' * 60}")
+        print(f"Starting repeat {repeat_idx + 1}/{args.num_repeats} with seed={repeat_seed}")
+        print(f"{'#' * 60}")
+
+        for iteration_idx, n_models in enumerate(model_counts):
+            save_dir = output_base / f"repeat_{repeat_idx + 1}" / f"train_size_{n_models}"
+            checkpoint_path = save_dir / "model_diversity.pth"
+
+            print(f"\n{'=' * 60}")
+            print(f"Processing {n_models} models (cumulative), repeat {repeat_idx + 1}/{args.num_repeats}")
+            print(f"{'=' * 60}")
+
+            if iteration_idx == 0:
+                if n_models == 0:
+                    cumulative_indices = []
+                else:
+                    np.random.seed(repeat_seed)
+                    cumulative_indices = list(np.random.choice(trainer.train_indices, size=n_models, replace=False))
+                    np.random.seed(None)
+            else:
+                candidates = [i for i in trainer.train_indices if i not in cumulative_indices]
+                n_to_add = n_models - len(cumulative_indices)
+                if n_to_add > 0:
+                    np.random.seed(repeat_seed + iteration_idx)
+                    new_indices = list(np.random.choice(candidates, size=n_to_add, replace=False))
+                    np.random.seed(None)
+                    cumulative_indices = cumulative_indices + new_indices
+
+            if args.skip_existing and checkpoint_path.exists():
+                print(f"Loading diversity surrogate from {checkpoint_path}...")
+                model_diversity = trainer.load_diversity_model(checkpoint_path)
+                loaded_from_checkpoint = True
+            else:
+                if n_models == 0:
+                    print("Initializing diversity surrogate with random weights (no training)...")
+                    model_diversity = trainer.build_diversity_model()
+                else:
+                    print(f"Training diversity surrogate on {len(cumulative_indices)} models...")
+                    model_diversity = trainer.train_diversity_model(cumulative_indices)
+                trainer.save_diversity_model(model_diversity, save_dir)
+                loaded_from_checkpoint = False
+
+            print("Computing embeddings and metrics...")
+            embs_np = trainer.compute_embeddings_for_model(model_diversity)
+            metrics = trainer.evaluate_embeddings(embs_np)
+
+            results.append(
+                {
+                    "repeat_idx": repeat_idx,
+                    "repeat_number": repeat_idx + 1,
+                    "seed": repeat_seed,
+                    "n_models": n_models,
+                    "loaded_from_checkpoint": loaded_from_checkpoint,
+                    "checkpoint_path": str(checkpoint_path),
+                    "metrics": metrics,
+                }
+            )
+
+    aggregated_results = aggregate_results_by_train_size(results)
+
     print("\nGenerating plots...")
-    plot_correlation_vs_samples(results, plots_dir)
-    plot_recall_vs_samples(results, plots_dir)
+    plot_correlation_vs_samples(aggregated_results, plots_dir)
+    plot_recall_vs_samples(aggregated_results, plots_dir)
     save_results(output_base, results)
-    print_summary(results)
+    print_summary(aggregated_results)
 
 
 if __name__ == "__main__":

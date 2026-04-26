@@ -6,6 +6,7 @@ from pathlib import Path
 import random
 from typing import List, Tuple, Optional, Dict, Any
 import time
+import copy
 
 import numpy as np
 import torch
@@ -224,45 +225,74 @@ class DiversityNESRunner:
             config.device if torch.cuda.is_available() else "cpu"
         )
 
-    def get_data_loaders(
-        self, batch_size: Optional[int] = None, seed: Optional[int] = None
-    ):
-        """Creates data loaders."""
-        bs = batch_size or self.config.batch_size_final
+    def prepare_datasets(self, download: bool = False):
+        """Creates dataset objects without rebuilding split logic."""
         dataset_cls = self.dataset_cls
-
         train_data = nni.trace(dataset_cls)(
             root=self.config.final_dataset_path,
             train=True,
-            download=True,
+            download=download,
             transform=self.train_transform,
         )
         test_data = nni.trace(dataset_cls)(
             root=self.config.final_dataset_path,
             train=False,
-            download=True,
+            download=download,
             transform=self.test_transform,
         )
+        return train_data, test_data
 
-        num_samples = len(train_data)
+    def build_split_indices(self, num_samples: int, seed: Optional[int] = None):
+        """Builds deterministic train/validation split indices once."""
         indices = list(range(num_samples))
-        np.random.seed(seed or self.config.seed)
-        np.random.shuffle(indices)
-
+        rng = np.random.default_rng(seed or self.config.seed)
+        rng.shuffle(indices)
         split = int(num_samples * self.config.train_size_final)
-        train_subset = Subset(train_data, indices[:split])
+        return indices[:split], indices[split:]
+
+    def get_data_loaders(
+        self,
+        batch_size: Optional[int] = None,
+        seed: Optional[int] = None,
+        train_indices: Optional[List[int]] = None,
+        valid_indices: Optional[List[int]] = None,
+        download: bool = False,
+    ):
+        """Creates data loaders."""
+        bs = batch_size or self.config.batch_size_final
+        train_data, test_data = self.prepare_datasets(download=download)
+
+        if train_indices is None or valid_indices is None:
+            train_indices, valid_indices = self.build_split_indices(
+                len(train_data), seed=seed
+            )
+
+        train_subset = Subset(train_data, train_indices)
         train_loader = DataLoader(
-            train_subset, batch_size=bs, num_workers=00, shuffle=True
+            train_subset,
+            batch_size=bs,
+            num_workers=self.config.num_workers,
+            shuffle=True,
         )
 
-        split_valid = int(num_samples * self.config.train_size_final)
-        valid_subset = Subset(train_data, indices[split_valid:])
+        valid_subset = Subset(train_data, valid_indices)
         valid_loader = DataLoader(
-            valid_subset, batch_size=bs, num_workers=0, shuffle=False
+            valid_subset,
+            batch_size=bs,
+            num_workers=self.config.num_workers,
+            shuffle=False,
         )
 
         test_loader = DataLoader(
-            test_data, batch_size=bs, num_workers=20, shuffle=False
+            test_data,
+            batch_size=bs,
+            num_workers=self.config.num_workers,
+            shuffle=False,
+        )
+
+        print(
+            f"[DATALOADER] pid={os.getpid()} bs={bs} num_workers={self.config.num_workers} "
+            f"train_len={len(train_subset)} valid_len={len(valid_subset)} test_len={len(test_data)}"
         )
         return train_loader, valid_loader, test_loader
 
@@ -291,6 +321,12 @@ class DiversityNESRunner:
 
         metrics_callback = MetricsCallback()
 
+        print(
+            f"[TRAIN START] model_id={model_id} pid={os.getpid()} device={self.device} "
+            f"train_loader_workers={getattr(train_loader, 'num_workers', 'n/a')} "
+            f"valid_loader_is_none={valid_loader is None}"
+        )
+
         try:
             with model_context(architecture):
                 model = DartsSpace(
@@ -317,7 +353,7 @@ class DiversityNESRunner:
                     max_epochs=self.config.n_epochs_final,
                     fast_dev_run=self.config.developer_mode,
                     accelerator="gpu" if self.device.type == "cuda" else "cpu",
-                    devices=1,
+                    devices=[self.device.index] if self.device.type == "cuda" else 1,
                     strategy="auto",
                     enable_progress_bar=True,
                     precision="bf16-mixed",
@@ -329,6 +365,9 @@ class DiversityNESRunner:
                 val_dataloaders=valid_loader,
             )
             evaluator.fit(model)
+            if model is None:
+                print(f"[TRAIN ERROR] model_id={model_id} returned None after fit")
+                return None
             model = model.to(self.device)
 
             time.sleep(1.0)
@@ -343,6 +382,10 @@ class DiversityNESRunner:
             return model
 
         except Exception as e:
+            print(
+                f"[TRAIN EXCEPTION] model_id={model_id} pid={os.getpid()} "
+                f"num_workers={getattr(train_loader, 'num_workers', 'n/a')} error={str(e)}"
+            )
             print(f"Error training model {model_id}: {str(e)}")
             self._save_error_info(model_id, str(e))
             return None
@@ -889,23 +932,46 @@ class DiversityNESRunner:
         num_classes: int,
         archs_path,
         pth_path,
+        train_indices: List[int],
+        valid_indices: List[int],
     ):
         """The target process for parallel learning."""
-        os.environ["CUDA_VISIBLE_DEVICES"] = str(physical_gpu_id)
-
+        local_config = copy.deepcopy(config)
+        local_config.num_workers = 0
         if torch.cuda.is_available():
-            torch.cuda.set_device(0)
+            visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+            local_gpu_id = 0 if visible_devices else physical_gpu_id
+            local_config.device = f"cuda:{local_gpu_id}"
+            torch.cuda.set_device(local_gpu_id)
             torch.cuda.empty_cache()
+            print(
+                f"[GPU MAP][train] physical_gpu_id={physical_gpu_id}, "
+                f"CUDA_VISIBLE_DEVICES='{visible_devices}', local_gpu_id={local_gpu_id}"
+            )
+        else:
+            local_config.device = "cpu"
 
         torch.set_float32_matmul_precision("high")
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        device = torch.device(local_config.device)
 
         runner = DiversityNESRunner(
-            config, DatasetsInfo.get(config.dataset_name.lower())
+            local_config, DatasetsInfo.get(local_config.dataset_name.lower())
         )
-        train_loader, valid_loader, test_loader = runner.get_data_loaders()
+        train_loader, valid_loader, test_loader = runner.get_data_loaders(
+            train_indices=train_indices,
+            valid_indices=valid_indices,
+            download=False,
+        )
+
+        print(
+            f"[PROCESS TRAIN] model_id={model_id} pid={os.getpid()} "
+            f"forced_num_workers={local_config.num_workers} valid_loader_len={len(valid_loader)}"
+        )
 
         model = runner.train_model(architecture, train_loader, None, model_id)
+        if model is None:
+            print(f"[PROCESS TRAIN] model_id={model_id} training failed, skipping save/eval")
+            return
         model = model.to(device)
 
         torch.save(model.state_dict(), pth_path / f"model_{model_id}.pth")
@@ -968,6 +1034,9 @@ class DiversityNESRunner:
         json_dir = root_dir / f"trained_models_archs_{index}"
         pth_dir = root_dir / f"trained_models_pth_{index}"
 
+        train_data, _ = self.prepare_datasets(download=True)
+        train_indices, valid_indices = self.build_split_indices(len(train_data))
+
         if not json_dir.exists():
             raise FileNotFoundError(f"Directory not found: {json_dir}")
         if not pth_dir.exists():
@@ -1025,6 +1094,8 @@ class DiversityNESRunner:
                     self.config,
                     self.dataset_key,
                     self.num_classes,
+                    train_indices,
+                    valid_indices,
                 ),
             )
             p.start()
@@ -1081,21 +1152,37 @@ class DiversityNESRunner:
         config: TrainConfig,
         dataset_key: str,
         num_classes: int,
+        train_indices: List[int],
+        valid_indices: List[int],
     ):
         """The process of evaluating a single pre-trained model."""
-        os.environ["CUDA_VISIBLE_DEVICES"] = str(physical_gpu_id)
+        local_config = copy.deepcopy(config)
+        local_config.num_workers = 0
 
         try:
             if torch.cuda.is_available():
-                torch.cuda.set_device(0)
+                visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+                local_gpu_id = 0 if visible_devices else physical_gpu_id
+                local_config.device = f"cuda:{local_gpu_id}"
+                torch.cuda.set_device(local_gpu_id)
                 torch.cuda.empty_cache()
+                print(
+                    f"[GPU MAP][eval] physical_gpu_id={physical_gpu_id}, "
+                    f"CUDA_VISIBLE_DEVICES='{visible_devices}', local_gpu_id={local_gpu_id}"
+                )
+            else:
+                local_config.device = "cpu"
             torch.set_float32_matmul_precision("high")
 
-            device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+            device = torch.device(local_config.device)
 
-            info = DatasetsInfo.get(config.dataset_name.lower())
-            runner = DiversityNESRunner(config, info)
-            _, valid_loader, test_loader = runner.get_data_loaders()
+            info = DatasetsInfo.get(local_config.dataset_name.lower())
+            runner = DiversityNESRunner(local_config, info)
+            _, valid_loader, test_loader = runner.get_data_loaders(
+                train_indices=train_indices,
+                valid_indices=valid_indices,
+                download=False,
+            )
 
             if config.evaluate_ensemble_flag:
                 eval_loader = test_loader
@@ -1175,10 +1262,9 @@ class DiversityNESRunner:
                 print(f"Skipping index {idx}: missing directories.")
 
     def run(self) -> None:
-        try:
-            mp.set_start_method("spawn", force=True)
-        except RuntimeError:
-            pass
+
+        train_data, _ = self.prepare_datasets(download=True)
+        train_indices, valid_indices = self.build_split_indices(len(train_data))
 
         print("Loading architectures...")
         index_2_json_dir = {}
@@ -1247,6 +1333,8 @@ class DiversityNESRunner:
                     self.num_classes,
                     archs_path,
                     pth_path,
+                    train_indices,
+                    valid_indices,
                 ),
             )
             p.start()
@@ -1271,7 +1359,11 @@ class DiversityNESRunner:
                 self.models = []
                 self.fill_models_list(archs_path, pth_path)
                 if self.models:
-                    _, _, test_loader = self.get_data_loaders()
+                    _, _, test_loader = self.get_data_loaders(
+                        train_indices=train_indices,
+                        valid_indices=valid_indices,
+                        download=False,
+                    )
                     stats = collect_ensemble_stats(
                         models=self.models,
                         device=self.device,
@@ -1294,7 +1386,7 @@ class DiversityNESRunner:
     def _get_available_gpus(self) -> List[int]:
         cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "")
         if cuda_visible:
-            return [int(x.strip()) for x in cuda_visible.split(",")]
+            return [int(x.strip()) for x in cuda_visible.split(",") if x.strip()]
         return list(range(torch.cuda.device_count()))
 
 

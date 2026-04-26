@@ -6,6 +6,7 @@ from joblib import Parallel, delayed
 from pathlib import Path
 import numpy as np
 import multiprocessing as mp
+from typing import Iterator, List
 
 DARTS_OPS = [
     # 'none',
@@ -78,20 +79,21 @@ def generate_unique_seeds(N_MODELS, low=1, high=int(1e9)):
     return list(seeds)
 
 
+def _chunk_list(lst, n):
+    for i in range(0, len(lst), n):
+        yield lst[i : i + n]
+
+
+def _safe_generate_batch(seed_batch):
+    return [generate_single_architecture(seed=s) for s in seed_batch]
+
+
 def generate_arch_dicts(N_MODELS, use_tqdm=False, n_jobs=None, batch_size=100):
     if n_jobs is None:
         n_jobs = min(8, mp.cpu_count())
 
     seeds = generate_unique_seeds(N_MODELS)
-
-    def chunks(lst, n):
-        for i in range(0, len(lst), n):
-            yield lst[i : i + n]
-
-    def safe_generate_batch(seed_batch):
-        return [generate_single_architecture(seed=s) for s in seed_batch]
-
-    batches = list(chunks(seeds, batch_size))
+    batches = list(_chunk_list(seeds, batch_size))
     iterable = (
         tqdm(batches, desc="Generating batches", total=len(batches))
         if use_tqdm
@@ -99,10 +101,42 @@ def generate_arch_dicts(N_MODELS, use_tqdm=False, n_jobs=None, batch_size=100):
     )
 
     results = Parallel(n_jobs=n_jobs, backend="loky")(
-        delayed(safe_generate_batch)(batch) for batch in iterable
+        delayed(_safe_generate_batch)(batch) for batch in iterable
     )
 
     return [arch for batch in results for arch in batch]
+
+
+def generate_arch_dicts_in_chunks(
+    n_models: int,
+    chunk_size: int,
+    use_tqdm: bool = False,
+    n_jobs: int = None,
+    generation_batch_size: int = 100,
+) -> Iterator[List[dict]]:
+    if n_models <= 0:
+        return
+
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be positive")
+
+    if n_jobs is None:
+        n_jobs = min(8, mp.cpu_count())
+
+    seeds = generate_unique_seeds(n_models)
+    chunk_seed_batches = list(_chunk_list(seeds, chunk_size))
+    iterator = (
+        tqdm(chunk_seed_batches, desc="Generating architecture chunks")
+        if use_tqdm
+        else chunk_seed_batches
+    )
+
+    for seed_chunk in iterator:
+        generation_batches = list(_chunk_list(seed_chunk, generation_batch_size))
+        results = Parallel(n_jobs=n_jobs, backend="loky")(
+            delayed(_safe_generate_batch)(batch) for batch in generation_batches
+        )
+        yield [arch for batch in results for arch in batch]
 
 
 def mutate_architectures(
