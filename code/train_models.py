@@ -15,9 +15,7 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 import traceback
 from torch.utils.data import Subset
-from torchvision import transforms
-from torchvision.datasets import CIFAR10, CIFAR100, FashionMNIST
-from nni.nas.evaluator.pytorch import DataLoader, Lightning, Trainer
+from nni.nas.evaluator.pytorch import DataLoader
 from nni.nas.space import model_context
 from tqdm import tqdm
 
@@ -27,8 +25,14 @@ import warnings
 warnings.filterwarnings("ignore")
 
 from utils_nni.DartsSpace import DARTS_with_CIFAR100 as DartsSpace
-from dependencies.darts_classification_module import DartsClassificationModule
+from dependencies.dataset_info import DatasetsInfo
 from dependencies.train_config import TrainConfig
+from dependencies.train_utils import (
+    load_json_from_directory,
+    build_optimizer_and_scheduler,
+    save_training_checkpoint,
+    load_training_checkpoint,
+)
 from dependencies.metrics import (
     collect_ensemble_stats,
     calculate_nll,
@@ -37,171 +41,6 @@ from dependencies.metrics import (
     calculate_brier_score,
     MetricsCallback,
 )
-
-# === AUXILIARY FUNCTIONS ===
-
-
-def load_json_from_directory(directory_path: Path) -> List[dict]:
-    """
-    Downloads all JSON files from a directory and its subdirectories.
-    Adds the 'id' field from the file name, if missing.
-    """
-    if not directory_path.exists():
-        raise FileNotFoundError(f"Directory {directory_path} does not exist")
-
-    json_data = []
-    for root, _, files in os.walk(directory_path):
-        for file in files:
-            if file.endswith(".json"):
-                file_path = Path(root) / file
-                try:
-                    with open(file_path, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                    if "id" not in data:
-                        match = re.search(r"(\d+)\.json$", file)
-                        if match:
-                            data["id"] = int(match.group(1))
-                    json_data.append(data)
-                except json.JSONDecodeError as e:
-                    print(f"Error decoding JSON from {file_path}: {e}")
-    return json_data
-
-
-class Cutout:
-    """Apply cutout to an image tensor."""
-
-    def __init__(self, length: int):
-        self.length = length
-
-    def __call__(self, img: torch.Tensor) -> torch.Tensor:
-        if not isinstance(img, torch.Tensor):
-            raise TypeError(f"img should be Tensor. Got {type(img)}")
-
-        device = img.device
-        c, h, w = img.size()
-        mask = torch.ones((h, w), dtype=torch.float32, device=device)
-
-        y = torch.randint(0, h, (1,), device=device).item()
-        x = torch.randint(0, w, (1,), device=device).item()
-
-        y1 = max(0, y - self.length // 2)
-        y2 = min(h, y + self.length // 2)
-        x1 = max(0, x - self.length // 2)
-        x2 = min(w, x + self.length // 2)
-
-        mask[y1:y2, x1:x2] = 0.0
-        mask = mask.unsqueeze(0).expand_as(img)
-        return img * mask
-
-
-def duplicate_channel(x: torch.Tensor) -> torch.Tensor:
-    """Duplicates a single-channel image into 3 channels."""
-    return x.repeat(3, 1, 1)
-
-
-# === INFORMATION ABOUT DATASETS ===
-
-
-class DatasetsInfo:
-    """Configuration of datasets: transformations, normalization, classes."""
-
-    DATASETS = {
-        "cifar10": {
-            "key": "cifar",
-            "class": CIFAR10,
-            "num_classes": 10,
-            "mean": [0.4914, 0.4822, 0.4465],
-            "std": [0.2470, 0.2435, 0.2616],
-            "img_size": 32,
-            "train_transform": transforms.Compose(
-                [
-                    transforms.RandomCrop(32, padding=4),
-                    transforms.RandomHorizontalFlip(),
-                    transforms.AutoAugment(transforms.AutoAugmentPolicy.CIFAR10),
-                    transforms.ToTensor(),
-                    transforms.Normalize(
-                        mean=[0.4914, 0.4822, 0.4465], std=[0.2470, 0.2435, 0.2616]
-                    ),
-                    Cutout(16),
-                ]
-            ),
-            "test_transform": transforms.Compose(
-                [
-                    transforms.ToTensor(),
-                    transforms.Normalize(
-                        mean=[0.4914, 0.4822, 0.4465], std=[0.2470, 0.2435, 0.2616]
-                    ),
-                ]
-            ),
-        },
-        "cifar100": {
-            "key": "cifar100",
-            "class": CIFAR100,
-            "num_classes": 100,
-            "mean": [0.5071, 0.4867, 0.4408],
-            "std": [0.2673, 0.2564, 0.2762],
-            "img_size": 32,
-            "train_transform": transforms.Compose(
-                [
-                    transforms.RandomCrop(32, padding=4),
-                    transforms.RandomHorizontalFlip(),
-                    transforms.AutoAugment(transforms.AutoAugmentPolicy.CIFAR10),
-                    transforms.ToTensor(),
-                    transforms.Normalize(
-                        mean=[0.5071, 0.4867, 0.4408], std=[0.2673, 0.2564, 0.2762]
-                    ),
-                    Cutout(16),
-                ]
-            ),
-            "test_transform": transforms.Compose(
-                [
-                    transforms.ToTensor(),
-                    transforms.Normalize(
-                        mean=[0.5071, 0.4867, 0.4408], std=[0.2673, 0.2564, 0.2762]
-                    ),
-                ]
-            ),
-        },
-        "fashionmnist": {
-            "key": "cifar",
-            "class": FashionMNIST,
-            "num_classes": 10,
-            "mean": [0.2860406] * 3,
-            "std": [0.35302424] * 3,
-            "img_size": 32,
-            "train_transform": transforms.Compose(
-                [
-                    transforms.Resize(32),
-                    transforms.RandomCrop(32, padding=4, padding_mode="reflect"),
-                    transforms.RandomHorizontalFlip(p=0.5),
-                    transforms.RandomRotation(5),
-                    transforms.ToTensor(),
-                    transforms.Lambda(duplicate_channel),
-                    transforms.Normalize(mean=[0.2860406] * 3, std=[0.35302424] * 3),
-                    Cutout(12),
-                ]
-            ),
-            "test_transform": transforms.Compose(
-                [
-                    transforms.Resize(32),
-                    transforms.ToTensor(),
-                    transforms.Lambda(duplicate_channel),
-                    transforms.Normalize(mean=[0.2860406] * 3, std=[0.35302424] * 3),
-                ]
-            ),
-        },
-    }
-
-    @classmethod
-    def get(cls, dataset_name: str) -> Dict[str, Any]:
-        """Returns the configuration of a dataset."""
-        dataset_name = dataset_name.lower()
-        if dataset_name not in cls.DATASETS:
-            raise ValueError(
-                f"Unknown dataset: {dataset_name}. Available: {list(cls.DATASETS.keys())}"
-            )
-        return cls.DATASETS[dataset_name]
-
 
 # === MAIN CLASS ===
 
@@ -310,6 +149,8 @@ class DiversityNESRunner:
         train_loader,
         valid_loader,
         model_id: int,
+        checkpoint_path: Optional[Path] = None,
+        resume_from_checkpoint: bool = False,
     ) -> Optional[torch.nn.Module]:
         """Trains one model in architecture."""
         seed = self.config.seed + model_id
@@ -320,6 +161,15 @@ class DiversityNESRunner:
             torch.cuda.manual_seed_all(seed)
 
         metrics_callback = MetricsCallback()
+        checkpoint_path = Path(checkpoint_path) if checkpoint_path is not None else None
+        resume_state = None
+
+        if resume_from_checkpoint and checkpoint_path is not None and checkpoint_path.exists():
+            resume_state = load_training_checkpoint(checkpoint_path, map_location="cpu")
+            print(
+                f"[CHECKPOINT] Resuming model {model_id} from {checkpoint_path} "
+                f"starting at epoch {resume_state.get('epoch', 0)}"
+            )
 
         print(
             f"[TRAIN START] model_id={model_id} pid={os.getpid()} device={self.device} "
@@ -336,48 +186,172 @@ class DiversityNESRunner:
                 )
             model = model.to(self.device)
             model.apply(self._custom_weight_init)
+            if resume_state is not None:
+                model.load_state_dict(resume_state["model_state_dict"])
 
-            evaluator = Lightning(
-                DartsClassificationModule(
-                    learning_rate=self.config.lr_start_final,
-                    weight_decay=self.config.weight_decay,
-                    auxiliary_loss_weight=self.config.auxiliary_loss_weight,
-                    max_epochs=self.config.n_epochs_final,
-                    num_classes=self.num_classes,
-                    lr_final=self.config.lr_end_final,
-                    label_smoothing=0.15,
-                    optimizer=self.config.optimizer,
-                ),
-                trainer=Trainer(
-                    gradient_clip_val=5.0,
-                    max_epochs=self.config.n_epochs_final,
-                    fast_dev_run=self.config.developer_mode,
-                    accelerator="gpu" if self.device.type == "cuda" else "cpu",
-                    devices=[self.device.index] if self.device.type == "cuda" else 1,
-                    strategy="auto",
-                    enable_progress_bar=True,
-                    precision="bf16-mixed",
-                    benchmark=True,
-                    callbacks=[metrics_callback],
-                    logger=False,
-                ),
-                train_dataloaders=train_loader,
-                val_dataloaders=valid_loader,
+            criterion = torch.nn.CrossEntropyLoss(label_smoothing=0.15)
+            optimizer, scheduler = build_optimizer_and_scheduler(
+                model=model,
+                optimizer_name=self.config.optimizer,
+                learning_rate=self.config.lr_start_final,
+                weight_decay=self.config.weight_decay,
+                lr_final=self.config.lr_end_final,
+                max_epochs=self.config.n_epochs_final,
             )
-            evaluator.fit(model)
-            if model is None:
-                print(f"[TRAIN ERROR] model_id={model_id} returned None after fit")
-                return None
-            model = model.to(self.device)
 
+            start_epoch = 0
+            if resume_state is not None:
+                model.load_state_dict(resume_state["model_state_dict"])
+                optimizer.load_state_dict(resume_state["optimizer_state_dict"])
+                if scheduler is not None and resume_state.get("scheduler_state_dict") is not None:
+                    scheduler.load_state_dict(resume_state["scheduler_state_dict"])
+                start_epoch = int(resume_state.get("epoch", 0))
+
+            for epoch in range(start_epoch, self.config.n_epochs_final):
+                model.train()
+                train_loss_sum = 0.0
+                train_correct = 0
+                train_total = 0
+
+                if hasattr(model, "drop_path_prob"):
+                    drop_path_max = float(getattr(model, "drop_path_prob"))
+                    ratio = min(1.0, float(epoch + 1) / float(max(1, self.config.n_epochs_final)))
+                    drop_prob = drop_path_max * ratio
+                    if hasattr(model, "set_drop_path_prob") and callable(getattr(model, "set_drop_path_prob")):
+                        model.set_drop_path_prob(drop_prob)
+                    else:
+                        setattr(model, "drop_path_prob", drop_prob)
+
+                progress_bar = tqdm(
+                    train_loader,
+                    desc=f"Epoch {epoch + 1}/{self.config.n_epochs_final}",
+                    leave=False,
+                )
+                for images, labels in progress_bar:
+                    images = images.to(self.device, non_blocking=True)
+                    labels = labels.to(self.device, non_blocking=True)
+
+                    optimizer.zero_grad(set_to_none=True)
+                    with torch.autocast(
+                        device_type="cuda" if self.device.type == "cuda" else "cpu",
+                        dtype=torch.bfloat16,
+                        enabled=self.device.type == "cuda",
+                    ):
+                        outputs = model(images)
+                        if (
+                            self.config.auxiliary_loss_weight
+                            and isinstance(outputs, (tuple, list))
+                            and len(outputs) == 2
+                        ):
+                            logits, aux_logits = outputs
+                            loss_main = criterion(logits, labels)
+                            loss_aux = criterion(aux_logits, labels)
+                            loss = loss_main + self.config.auxiliary_loss_weight * loss_aux
+                        else:
+                            logits = outputs[0] if isinstance(outputs, (tuple, list)) else outputs
+                            loss = criterion(logits, labels)
+
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
+                    optimizer.step()
+
+                    batch_size = labels.size(0)
+                    train_loss_sum += loss.item() * batch_size
+                    preds = logits.argmax(dim=1)
+                    train_correct += (preds == labels).sum().item()
+                    train_total += batch_size
+
+                    progress_bar.set_postfix(
+                        loss=f"{loss.item():.4f}",
+                        acc=f"{train_correct / max(1, train_total):.4f}",
+                        lr=f"{optimizer.param_groups[0]['lr']:.6f}",
+                    )
+
+                    if self.config.developer_mode:
+                        break
+
+                train_loss = train_loss_sum / max(1, train_total)
+                train_acc = train_correct / max(1, train_total)
+
+                val_loss = None
+                val_acc = None
+                if valid_loader is not None:
+                    model.eval()
+                    val_loss_sum = 0.0
+                    val_correct = 0
+                    val_total = 0
+                    with torch.no_grad():
+                        for images, labels in valid_loader:
+                            images = images.to(self.device, non_blocking=True)
+                            labels = labels.to(self.device, non_blocking=True)
+                            with torch.autocast(
+                                device_type="cuda" if self.device.type == "cuda" else "cpu",
+                                dtype=torch.bfloat16,
+                                enabled=self.device.type == "cuda",
+                            ):
+                                outputs = model(images)
+                                logits = outputs[0] if isinstance(outputs, (tuple, list)) else outputs
+                                loss = criterion(logits, labels)
+
+                            batch_size = labels.size(0)
+                            val_loss_sum += loss.item() * batch_size
+                            preds = logits.argmax(dim=1)
+                            val_correct += (preds == labels).sum().item()
+                            val_total += batch_size
+
+                            if self.config.developer_mode:
+                                break
+
+                    val_loss = val_loss_sum / max(1, val_total)
+                    val_acc = val_correct / max(1, val_total)
+
+                metrics_callback.epochs.append(epoch)
+                metrics_callback.train_losses.append(train_loss)
+                metrics_callback.train_accs.append(train_acc)
+                metrics_callback.lrs.append(optimizer.param_groups[0]["lr"])
+                if val_loss is not None:
+                    metrics_callback.val_losses.append(val_loss)
+                if val_acc is not None:
+                    metrics_callback.val_accs.append(val_acc)
+                metrics_callback._has_data = True
+
+                print(
+                    f"[EPOCH {epoch + 1}/{self.config.n_epochs_final}] "
+                    f"train_loss={train_loss:.4f} train_acc={train_acc:.4f} "
+                    f"val_loss={(f'{val_loss:.4f}' if val_loss is not None else 'n/a')} "
+                    f"val_acc={(f'{val_acc:.4f}' if val_acc is not None else 'n/a')} "
+                    f"lr={optimizer.param_groups[0]['lr']:.6f}"
+                )
+
+                if scheduler is not None:
+                    scheduler.step()
+
+                if (
+                    checkpoint_path is not None
+                    and self.config.checkpoint_every_n_epochs > 0
+                    and (epoch + 1) % self.config.checkpoint_every_n_epochs == 0
+                ):
+                    save_training_checkpoint(
+                        checkpoint_path=checkpoint_path,
+                        epoch=epoch + 1,
+                        model=model,
+                        optimizer=optimizer,
+                        scheduler=scheduler,
+                    )
+                    print(
+                        f"[CHECKPOINT] Saved periodic checkpoint at epoch {epoch + 1} to {checkpoint_path}"
+                    )
+
+                if self.config.developer_mode:
+                    break
+
+            model = model.to(self.device)
             time.sleep(1.0)
 
             if metrics_callback._has_data and len(metrics_callback.epochs) > 0:
                 self._save_training_plot(metrics_callback, model_id)
             else:
                 print(f"⏳ Model {model_id}: Waiting for metrics to be collected...")
-                if hasattr(evaluator, "trainer") and evaluator.trainer is not None:
-                    print(f"🔍 Trainer metrics: {evaluator.trainer.callback_metrics}")
 
             return model
 
@@ -932,6 +906,7 @@ class DiversityNESRunner:
         num_classes: int,
         archs_path,
         pth_path,
+        checkpoint_dir,
         train_indices: List[int],
         valid_indices: List[int],
     ):
@@ -940,7 +915,19 @@ class DiversityNESRunner:
         local_config.num_workers = 0
         if torch.cuda.is_available():
             visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES", "")
-            local_gpu_id = 0 if visible_devices else physical_gpu_id
+            if visible_devices:
+                visible_gpu_ids = [
+                    int(x.strip()) for x in visible_devices.split(",") if x.strip()
+                ]
+                try:
+                    local_gpu_id = visible_gpu_ids.index(physical_gpu_id)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"physical_gpu_id={physical_gpu_id} is not present in "
+                        f"CUDA_VISIBLE_DEVICES='{visible_devices}'"
+                    ) from exc
+            else:
+                local_gpu_id = physical_gpu_id
             local_config.device = f"cuda:{local_gpu_id}"
             torch.cuda.set_device(local_gpu_id)
             torch.cuda.empty_cache()
@@ -968,14 +955,33 @@ class DiversityNESRunner:
             f"forced_num_workers={local_config.num_workers} valid_loader_len={len(valid_loader)}"
         )
 
-        model = runner.train_model(architecture, train_loader, None, model_id)
+        final_model_path = Path(pth_path) / f"model_{model_id}.pth"
+        checkpoint_path = Path(checkpoint_dir) / f"model_{model_id}.ckpt"
+
+        if final_model_path.exists():
+            print(
+                f"[PROCESS TRAIN] model_id={model_id} final weights already exist at {final_model_path}, skipping training"
+            )
+            return
+
+        model = runner.train_model(
+            architecture,
+            train_loader,
+            None,
+            model_id,
+            checkpoint_path=checkpoint_path,
+            resume_from_checkpoint=checkpoint_path.exists(),
+        )
         if model is None:
             print(f"[PROCESS TRAIN] model_id={model_id} training failed, skipping save/eval")
             return
         model = model.to(device)
 
-        torch.save(model.state_dict(), pth_path / f"model_{model_id}.pth")
+        torch.save(model.state_dict(), final_model_path)
         print(f"[GPU {physical_gpu_id}] Model {model_id} saved to {pth_path}")
+        if checkpoint_path.exists():
+            checkpoint_path.unlink()
+            print(f"[CHECKPOINT] Removed resume checkpoint {checkpoint_path}")
 
         eval_loader = test_loader if config.evaluate_ensemble_flag else valid_loader
         runner.evaluate_and_save_results(
@@ -1162,7 +1168,19 @@ class DiversityNESRunner:
         try:
             if torch.cuda.is_available():
                 visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES", "")
-                local_gpu_id = 0 if visible_devices else physical_gpu_id
+                if visible_devices:
+                    visible_gpu_ids = [
+                        int(x.strip()) for x in visible_devices.split(",") if x.strip()
+                    ]
+                    try:
+                        local_gpu_id = visible_gpu_ids.index(physical_gpu_id)
+                    except ValueError as exc:
+                        raise ValueError(
+                            f"physical_gpu_id={physical_gpu_id} is not present in "
+                            f"CUDA_VISIBLE_DEVICES='{visible_devices}'"
+                        ) from exc
+                else:
+                    local_gpu_id = physical_gpu_id
                 local_config.device = f"cuda:{local_gpu_id}"
                 torch.cuda.set_device(local_gpu_id)
                 torch.cuda.empty_cache()
@@ -1308,9 +1326,11 @@ class DiversityNESRunner:
         for cur_index in index_2_json_dir.keys():
             archs_path = output_path / f"trained_models_archs_{cur_index}"
             pth_path = output_path / f"trained_models_pth_{cur_index}"
+            checkpoint_dir = output_path / f"checkpoints_{cur_index}"
             archs_and_pth_path_list.append((archs_path, pth_path))
             archs_path.mkdir(parents=True, exist_ok=True)
             pth_path.mkdir(parents=True, exist_ok=True)
+            checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
         processes = []
 
@@ -1321,6 +1341,7 @@ class DiversityNESRunner:
 
             archs_path = output_path / f"trained_models_archs_{cur_index}"
             pth_path = output_path / f"trained_models_pth_{cur_index}"
+            checkpoint_dir = output_path / f"checkpoints_{cur_index}"
 
             p = mp.get_context("spawn").Process(
                 target=self.train_single_model_process,
@@ -1333,6 +1354,7 @@ class DiversityNESRunner:
                     self.num_classes,
                     archs_path,
                     pth_path,
+                    checkpoint_dir,
                     train_indices,
                     valid_indices,
                 ),
@@ -1400,9 +1422,17 @@ if __name__ == "__main__":
         required=True,
         help="Path to JSON file with TrainConfig parameters",
     )
+    parser.add_argument(
+        "--checkpoint_every_n_epochs",
+        type=int,
+        default=None,
+        help="Save per-model resume checkpoints every N epochs. 0 disables periodic checkpoints.",
+    )
     args = parser.parse_args()
 
     params = json.loads(Path(args.hyperparameters_json).read_text())
+    if args.checkpoint_every_n_epochs is not None:
+        params["checkpoint_every_n_epochs"] = args.checkpoint_every_n_epochs
     params["device"] = "cuda:0" if torch.cuda.is_available() else "cpu"
     assert params["seed"] != -1, "Seed must be set!"
 

@@ -48,6 +48,7 @@ class TrainConfig:
     greedy_choice_out_of_best: bool
     
     max_per_gpu: int
+    checkpoint_every_n_epochs: int
     train_size_final: float
     n_epochs_final: int
     optimizer: str
@@ -105,6 +106,7 @@ class TrainConfig:
             0 <= self.lower_margin < self.upper_margin <= 1
         ), "Margins must satisfy 0 ≤ lower < upper ≤ 1"
         assert 0 <= self.train_size <= 1, "train_size must be in [0,1]"
+        assert self.checkpoint_every_n_epochs >= 0, "checkpoint_every_n_epochs must be >= 0"
         
         if self.seed == -1 or self.seed is None:
             self.seed = np.random.randint(9999999)
