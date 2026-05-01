@@ -66,6 +66,8 @@ class TrainConfig:
     num_workers: int
     n_ece_bins: int
 
+    accuracy_retrieval: bool = False
+
     seed: Optional[int] = None
 
     # Internal fields

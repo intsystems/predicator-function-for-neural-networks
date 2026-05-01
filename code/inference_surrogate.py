@@ -29,6 +29,7 @@ from dependencies.GCN import (
     CustomDataset,
     collate_graphs,
     extract_dual_embeddings,
+    extract_embeddings,
 )
 from dependencies.data_generator import (
     generate_arch_dicts,
@@ -69,6 +70,11 @@ class InferSurrogate:
         self.model_accuracy.load_state_dict(state_dict_acc)
         self.model_accuracy.eval()
 
+        if getattr(self.config, "accuracy_retrieval", False):
+            self.model_diversity = None
+            print("Accuracy surrogate loaded (diversity model skipped for accuracy_retrieval).")
+            return
+
         self.model_diversity = GAT_ver_2(
             self.config.input_dim,
             self.config.div_output_dim,
@@ -95,6 +101,7 @@ class InferSurrogate:
                 - 'greedy_forward': Greedy iterative selection based on accuracy and diversity.
                 - 'cluster': Selection of models closest to the cluster centroids.
                 - 'random': Random selection.
+                - 'accuracy_retrieval': Top-k by predicted accuracy only (no diversity).
         """
         self._clear_all_buffers()
 
@@ -131,6 +138,12 @@ class InferSurrogate:
                 )
         elif strategy == "random":
             selected_archs = self.select_randomly(self.potential_archs, n_select)
+        elif strategy == "accuracy_retrieval":
+            selected_archs = self.select_topk_by_accuracy(
+                self.potential_archs,
+                self.potential_accuracies,
+                n_select,
+            )
         else:
             raise ValueError(f"Unknown selection strategy: {strategy}")
 
@@ -281,6 +294,32 @@ class InferSurrogate:
 
         return selected_archs, selected_embs, selected_indices
 
+    def select_topk_by_accuracy(
+        self,
+        archs: List[Dict],
+        accs: np.ndarray,
+        n_select: int,
+    ) -> List[Dict]:
+        """
+        Picks the top ``n_select`` architectures by surrogate-predicted accuracy.
+        """
+        if len(archs) == 0:
+            return []
+        n_take = min(n_select, len(archs))
+        order = np.argsort(-accs)[:n_take]
+        selected = [archs[i] for i in order]
+        for rank, idx in enumerate(order, start=1):
+            print(
+                f"Selected model {rank}/{n_take}: "
+                f"predicted accuracy = {accs[idx] / 100:.4f}"
+            )
+        if len(archs) < n_select:
+            print(
+                f"Warning: Only {len(archs)} candidates available, "
+                f"returning all (requested {n_select})."
+            )
+        return selected
+
     def select_randomly(self, archs: List[Dict], n_select: int) -> List[Dict]:
         if len(archs) <= n_select:
             print("Generate random archs, because dont have enough")
@@ -303,7 +342,10 @@ class InferSurrogate:
 
             total_seen += len(arch_chunk)
             archs, accs_np, embs_np = self._get_embeddings(arch_chunk)
-            mask = (accs_np / 100) >= self.config.min_accuracy_for_pool
+            if getattr(self.config, "accuracy_retrieval", False):
+                mask = np.ones(len(archs), dtype=bool)
+            else:
+                mask = (accs_np / 100) >= self.config.min_accuracy_for_pool
 
             kept_archs = [arch for arch, ok in zip(archs, mask) if ok]
             kept_accs = accs_np[mask]
@@ -314,11 +356,18 @@ class InferSurrogate:
                 self._append_potential_arrays(kept_accs, kept_embs)
                 total_kept += len(kept_archs)
 
-            print(
-                f"Processed chunk {chunk_idx}: {len(arch_chunk)} models, "
-                f"kept {len(kept_archs)} after accuracy filter. "
-                f"Accumulated kept models: {total_kept}."
-            )
+            if getattr(self.config, "accuracy_retrieval", False):
+                print(
+                    f"Processed chunk {chunk_idx}: {len(arch_chunk)} models, "
+                    f"kept {len(kept_archs)} (no accuracy threshold). "
+                    f"Accumulated: {total_kept}."
+                )
+            else:
+                print(
+                    f"Processed chunk {chunk_idx}: {len(arch_chunk)} models, "
+                    f"kept {len(kept_archs)} after accuracy filter. "
+                    f"Accumulated kept models: {total_kept}."
+                )
 
             torch.cuda.empty_cache()
             gc.collect()
@@ -327,10 +376,17 @@ class InferSurrogate:
             print("Error: No initial architectures were loaded or generated.")
             return
 
-        print(
-            f"Initial pool size: {total_seen}. "
-            f"After filtering by accuracy >= {self.config.min_accuracy_for_pool}: {len(self.potential_archs)} models."
-        )
+        if getattr(self.config, "accuracy_retrieval", False):
+            print(
+                f"Initial pool size: {total_seen}. "
+                f"Candidates for top-k (no min-accuracy filter): {len(self.potential_archs)} models."
+            )
+        else:
+            print(
+                f"Initial pool size: {total_seen}. "
+                f"After filtering by accuracy >= {self.config.min_accuracy_for_pool}: "
+                f"{len(self.potential_archs)} models."
+            )
 
     def _iter_architecture_chunks(self) -> Iterable[List[Dict]]:
         if self.config.use_pretrained_models_for_ensemble:
@@ -399,13 +455,23 @@ class InferSurrogate:
         )
 
         with torch.no_grad():
-            emb_acc_np, emb_div_np, _ = extract_dual_embeddings(
-                self.model_accuracy,
-                self.model_diversity,
-                loader,
-                self.device,
-                use_tqdm=True,
-            )
+            if getattr(self.config, "accuracy_retrieval", False):
+                emb_acc_np, _ = extract_embeddings(
+                    self.model_accuracy,
+                    loader,
+                    self.device,
+                    use_tqdm=True,
+                )
+                n = len(archs)
+                emb_div_np = np.zeros((n, 0), dtype=np.float32)
+            else:
+                emb_acc_np, emb_div_np, _ = extract_dual_embeddings(
+                    self.model_accuracy,
+                    self.model_diversity,
+                    loader,
+                    self.device,
+                    use_tqdm=True,
+                )
 
         return archs, np.asarray(emb_acc_np).reshape(-1), np.asarray(emb_div_np)
 
@@ -492,13 +558,28 @@ if __name__ == "__main__":
         required=True,
         help="Path to the JSON file with configuration.",
     )
+    parser.add_argument(
+        "--accuracy_retrieval",
+        action="store_true",
+        help=(
+            "Select top-k models by predicted accuracy only: skip diversity surrogate, "
+            "do not apply min_accuracy_for_pool, set strategy to accuracy_retrieval."
+        ),
+    )
     args = parser.parse_args()
 
     params = json.loads(Path(args.hyperparameters_json).read_text(encoding="utf-8"))
+    if args.accuracy_retrieval:
+        params["accuracy_retrieval"] = True
+        params["greedy_choice_out_of_best"] = False
+        params["random_choice_out_of_best"] = False
+
     config = TrainConfig(**params)
 
     strategy = None
-    if getattr(config, "greedy_choice_out_of_best", False):
+    if getattr(config, "accuracy_retrieval", False):
+        strategy = "accuracy_retrieval"
+    elif getattr(config, "greedy_choice_out_of_best", False):
         strategy = "greedy_forward"
     elif getattr(config, "random_choice_out_of_best", False):
         strategy = "random"

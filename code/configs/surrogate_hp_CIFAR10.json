@@ -46,6 +46,7 @@
     "tmp_archs_path": "datasets/tmp_archs/",
     "random_choice_out_of_best": true,
     "greedy_choice_out_of_best": false,
+    "accuracy_retrieval": false,
 
     "train_size_final": 1.0,
     "n_epochs_final": 600,

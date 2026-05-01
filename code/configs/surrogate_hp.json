@@ -42,6 +42,7 @@
     "tmp_archs_path": "datasets/tmp_archs/",
     "random_choice_out_of_best" : false,
     "greedy_choice_out_of_best" : true,
+    "accuracy_retrieval": false,
     "no_clusters_choice": false,
 
     "n_epochs_final": 100,
