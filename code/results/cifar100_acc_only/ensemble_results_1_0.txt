@@ -1,0 +1,48 @@
+============================================================
+ENSEMBLE EVALUATION RESULTS
+============================================================
+
+--- Basic Metrics ---
+Number of models:                    5
+Total samples:                       10000
+Ensemble Top-1 Accuracy:             84.99%
+Average Model Top-1 Accuracy:        80.47%
+
+--- Individual Model Accuracies ---
+  Model 1 Top-1 Accuracy:        80.51%
+  Model 2 Top-1 Accuracy:        80.35%
+  Model 3 Top-1 Accuracy:        80.66%
+  Model 4 Top-1 Accuracy:        80.69%
+  Model 5 Top-1 Accuracy:        80.16%
+
+--- Calibration Metrics ---
+Expected Calibration Error (ECE):    0.1363
+Negative Log-Likelihood (NLL):       0.6934
+Oracle NLL:                          0.4064
+Brier Score:                         0.2346
+
+--- Diversity Metrics ---
+Ambiguity (Ensemble Benefit):        0.0452
+Predictive Disagreement:             0.4078
+Normalized Pred. Disagreement:       0.2039
+
+============================================================
+ADVERSARIAL ATTACK RESULTS (FGSM)
+============================================================
+FGSM results not available.
+
+============================================================
+ADVERSARIAL ATTACK RESULTS (BIM)
+============================================================
+BIM results not available.
+
+============================================================
+ADVERSARIAL ATTACK RESULTS (PGD)
+============================================================
+PGD results not available.
+
+============================================================
+ADDITIONAL INFORMATION
+============================================================
+Ensemble improvement over avg model: 4.52%
+NLL improvement (Oracle - Ensemble): -0.2870
